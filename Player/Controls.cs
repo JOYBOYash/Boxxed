@@ -64,55 +64,64 @@ public class SmoothCubeRollController : MonoBehaviour
         }
     }
 
-    IEnumerator SmoothRoll(Vector3 direction)
+IEnumerator SmoothRoll(Vector3 direction)
+{
+    isRolling = true;
+
+    float size = transform.localScale.x;
+
+    Vector3 pivot =
+        transform.position +
+        (Vector3.down * size / 2f) +
+        (direction * size / 2f);
+
+    Vector3 axis = Vector3.Cross(Vector3.up, direction);
+
+    float elapsed = 0f;
+    float lastAngle = 0f;
+
+    while (elapsed < rollDuration)
     {
-        isRolling = true;
+        float t = elapsed / rollDuration;
 
-        float size = transform.localScale.x;
+        // ✅ Smooth but still physical
+        float easedT = t * t * (3f - 2f * t); // smoothstep (safe)
 
-        Vector3 pivot =
-            transform.position +
-            (Vector3.down * size / 2f) +
-            (direction * size / 2f);
+        float currentAngle = Mathf.Lerp(0f, 90f, easedT);
 
-        Vector3 axis = Vector3.Cross(Vector3.up, direction);
+        // 🔥 ONLY rotate the delta (this is the fix)
+        float deltaAngle = currentAngle - lastAngle;
 
-        float elapsed = 0f;
-        float angle = 0f;
+        transform.RotateAround(pivot, axis, deltaAngle);
 
-        while (elapsed < rollDuration)
-        {
-            float step = (90f / rollDuration) * Time.deltaTime;
+        lastAngle = currentAngle;
 
-            transform.RotateAround(pivot, axis, step);
-
-            angle += step;
-            elapsed += Time.deltaTime;
-
-            yield return null;
-        }
-
-        // Snap EXACTLY to 90° (fix floating errors)
-        float remaining = 90f - angle;
-        transform.RotateAround(pivot, axis, remaining);
-
-        // Snap rotation cleanly
-        transform.rotation = Quaternion.Euler(
-            Mathf.Round(transform.eulerAngles.x / 90f) * 90f,
-            Mathf.Round(transform.eulerAngles.y / 90f) * 90f,
-            Mathf.Round(transform.eulerAngles.z / 90f) * 90f
-        );
-
-        // Snap position cleanly
-        Vector3 p = transform.position;
-        transform.position = new Vector3(
-            Mathf.Round(p.x),
-            Mathf.Round(p.y),
-            Mathf.Round(p.z)
-        );
-
-        isRolling = false;
+        elapsed += Time.deltaTime;
+        yield return null;
     }
+
+    // 🔥 Finish remaining angle cleanly
+    float remaining = 90f - lastAngle;
+    transform.RotateAround(pivot, axis, remaining);
+
+    // Snap rotation
+    transform.rotation = Quaternion.Euler(
+        Mathf.Round(transform.eulerAngles.x / 90f) * 90f,
+        Mathf.Round(transform.eulerAngles.y / 90f) * 90f,
+        Mathf.Round(transform.eulerAngles.z / 90f) * 90f
+    );
+
+    // Snap position
+    Vector3 p = transform.position;
+    transform.position = new Vector3(
+        Mathf.Round(p.x),
+        Mathf.Round(p.y),
+        Mathf.Round(p.z)
+    );
+
+    isRolling = false;
+}
+
 
     Vector3 GetCameraRelativeDirection(Vector2 input)
     {
