@@ -3,71 +3,80 @@ using UnityEngine.InputSystem;
 using System.Collections;
 
 [RequireComponent(typeof(Rigidbody))]
-public class SmoothCubeRollController : MonoBehaviour
+public class CubeJumpFlipController : MonoBehaviour
 {
-    [Header("References")]
     public Transform cameraTransform;
 
-    [Header("Movement Settings")]
-    public float rollDuration = 0.15f; // Time for one roll
+    [Header("Movement")]
+    public float moveDistance = 1f;
+    public float jumpHeight = 0.5f;
+    public float moveDuration = 0.2f;
+
+    private bool isGrounded;
+    public float groundCheckDistance = 1.1f;
 
     private Rigidbody rb;
     private PlayerControls controls;
 
-    private Vector2 currentInput;
-    private bool isRolling;
+    private Vector2 input;
+    private bool isMoving;
 
     void Awake()
     {
         rb = GetComponent<Rigidbody>();
         controls = new PlayerControls();
 
-        rb.isKinematic = true; // IMPORTANT: we control movement manually
-
-        if (cameraTransform == null && Camera.main != null)
-            cameraTransform = Camera.main.transform;
+        rb.useGravity = true;
+        rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 
     void OnEnable()
     {
         controls.Enable();
 
-        controls.Player.Move.performed += OnMove;
-        controls.Player.Move.canceled += ctx => currentInput = Vector2.zero;
+        controls.Player.Move.performed += ctx => input = ctx.ReadValue<Vector2>();
+        controls.Player.Move.canceled += ctx => input = Vector2.zero;
     }
 
     void OnDisable()
     {
-        controls.Player.Move.performed -= OnMove;
         controls.Disable();
     }
 
-    void OnMove(InputAction.CallbackContext ctx)
+    void Update()
     {
-        currentInput = ctx.ReadValue<Vector2>();
+        CheckGround();
 
-        if (!isRolling && currentInput != Vector2.zero)
-            StartCoroutine(RollLoop());
-    }
-
-    IEnumerator RollLoop()
-    {
-        while (currentInput != Vector2.zero)
+        if (!isMoving && isGrounded && input != Vector2.zero)
         {
-            if (!isRolling)
-            {
-                Vector3 dir = GetCameraRelativeDirection(currentInput);
-                yield return StartCoroutine(SmoothRoll(dir));
-            }
-
-            yield return null;
+            Vector3 dir = GetDirection(input);
+            StartCoroutine(JumpFlip(dir));
         }
     }
 
-IEnumerator SmoothRoll(Vector3 direction)
-{
-    isRolling = true;
+    void CheckGround()
+    {
+        isGrounded = Physics.Raycast(
+            transform.position,
+            Vector3.down,
+            groundCheckDistance
+        );
+    }
 
+IEnumerator JumpFlip(Vector3 direction)
+{
+    if (!isGrounded)
+    {
+        isMoving = false;
+        yield break;
+    }
+
+    isMoving = true;
+
+    rb.velocity = Vector3.zero;
+    rb.angularVelocity = Vector3.zero;
+
+    float elapsed = 0f;
     float size = transform.localScale.x;
 
     Vector3 pivot =
@@ -77,22 +86,31 @@ IEnumerator SmoothRoll(Vector3 direction)
 
     Vector3 axis = Vector3.Cross(Vector3.up, direction);
 
-    float elapsed = 0f;
     float lastAngle = 0f;
 
-    while (elapsed < rollDuration)
+    Vector3 basePos = transform.position;
+    Quaternion baseRot = transform.rotation;
+
+    while (elapsed < moveDuration)
     {
-        float t = elapsed / rollDuration;
+        float t = elapsed / moveDuration;
+        float eased = t * t * (3f - 2f * t);
 
-        // ✅ Smooth but still physical
-        float easedT = t * t * (3f - 2f * t); // smoothstep (safe)
+        float currentAngle = Mathf.Lerp(0f, 90f, eased);
+        float delta = currentAngle - lastAngle;
 
-        float currentAngle = Mathf.Lerp(0f, 90f, easedT);
+        // 🔥 Compute rotation manually (no cumulative drift)
+        Quaternion rot = Quaternion.AngleAxis(currentAngle, axis) * baseRot;
 
-        // 🔥 ONLY rotate the delta (this is the fix)
-        float deltaAngle = currentAngle - lastAngle;
+        Vector3 pos =
+            Quaternion.AngleAxis(currentAngle, axis) * (basePos - pivot) + pivot;
 
-        transform.RotateAround(pivot, axis, deltaAngle);
+        // 🔥 SAFE jump arc (added AFTER rotation calc)
+        float hop = Mathf.Sin(eased * Mathf.PI) * 0.15f;
+        pos += Vector3.up * hop;
+
+        transform.position = pos;
+        transform.rotation = rot;
 
         lastAngle = currentAngle;
 
@@ -100,46 +118,48 @@ IEnumerator SmoothRoll(Vector3 direction)
         yield return null;
     }
 
-    // 🔥 Finish remaining angle cleanly
-    float remaining = 90f - lastAngle;
-    transform.RotateAround(pivot, axis, remaining);
+    SnapToGrid();
 
-    // Snap rotation
-    transform.rotation = Quaternion.Euler(
-        Mathf.Round(transform.eulerAngles.x / 90f) * 90f,
-        Mathf.Round(transform.eulerAngles.y / 90f) * 90f,
-        Mathf.Round(transform.eulerAngles.z / 90f) * 90f
-    );
-
-    // Snap position
-    Vector3 p = transform.position;
-    transform.position = new Vector3(
-        Mathf.Round(p.x),
-        Mathf.Round(p.y),
-        Mathf.Round(p.z)
-    );
-
-    isRolling = false;
+    isMoving = false;
 }
-
-
-    Vector3 GetCameraRelativeDirection(Vector2 input)
+    
+    void SnapToGrid()
     {
-        Vector3 forward = cameraTransform.forward;
-        Vector3 right = cameraTransform.right;
+        Vector3 p = transform.position;
+        transform.position = new Vector3(
+            Mathf.Round(p.x),
+            Mathf.Round(p.y),
+            Mathf.Round(p.z)
+        );
 
-        forward.y = 0;
-        right.y = 0;
+        Vector3 r = transform.eulerAngles;
+        transform.rotation = Quaternion.Euler(
+            Mathf.Round(r.x / 90f) * 90f,
+            Mathf.Round(r.y / 90f) * 90f,
+            Mathf.Round(r.z / 90f) * 90f
+        );
 
-        forward.Normalize();
-        right.Normalize();
-
-        Vector3 dir = forward * input.y + right * input.x;
-
-        // Snap to 4 directions (same as your logic)
-        if (Mathf.Abs(dir.x) > Mathf.Abs(dir.z))
-            return dir.x > 0 ? Vector3.right : Vector3.left;
-        else
-            return dir.z > 0 ? Vector3.forward : Vector3.back;
+        rb.position = transform.position;
+        rb.rotation = transform.rotation;
     }
+
+Vector3 GetDirection(Vector2 input)
+{
+    Vector3 forward = cameraTransform.forward;
+    Vector3 right = cameraTransform.right;
+
+    forward.y = 0;
+    right.y = 0;
+
+    forward.Normalize();
+    right.Normalize();
+
+    Vector3 rawDir = forward * input.y + right * input.x;
+
+    // 🔥 HARD SNAP (no diagonals EVER)
+    if (Mathf.Abs(rawDir.x) > Mathf.Abs(rawDir.z))
+        return rawDir.x > 0 ? Vector3.right : Vector3.left;
+    else
+        return rawDir.z > 0 ? Vector3.forward : Vector3.back;
+}
 }

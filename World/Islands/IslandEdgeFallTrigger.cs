@@ -1,14 +1,14 @@
-using UnityEngine;
+// using UnityEngine;
 
-public class EdgeFallTrigger : MonoBehaviour
-{
-    private void OnTriggerEnter(Collider other)
-    {
-        PlayerFallHandler player = other.GetComponent<PlayerFallHandler>();
+// public class EdgeFallTrigger : MonoBehaviour
+// {
 
-        if (player != null)
-        {
-            player.TriggerFall();
-        }
-    }
-}
+
+//     void OnTriggerEnter(Collider other)
+//     {
+//         if (other.CompareTag("Player"))
+//         {
+//             other.GetComponent<PlayerFallHandler>()?.TriggerFall();
+//         }
+//     }
+// }
