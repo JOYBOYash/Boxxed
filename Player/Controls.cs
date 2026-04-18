@@ -1,11 +1,28 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
+using UnityEngine.UI;
+using TMPro;
+
+
 
 [RequireComponent(typeof(Rigidbody))]
 public class CubeJumpFlipController : MonoBehaviour
 {
     public Transform cameraTransform;
+
+    public TextMeshProUGUI faceText; // assign in inspector
+
+    [Header("Dice Face Mapping (Editable in Inspector)")]
+
+    public int topFace = 1;
+    public int bottomFace = 6;
+    public int frontFace = 2;
+    public int backFace = 5;
+    public int rightFace = 3;
+    public int leftFace = 4;
+
+    
 
     [Header("Movement")]
     public float moveDistance = 1f;
@@ -14,6 +31,9 @@ public class CubeJumpFlipController : MonoBehaviour
 
     private bool isGrounded;
     public float groundCheckDistance = 1.1f;
+
+    private float inputBufferTime = 0.15f;
+    private float lastInputTime;
 
     private Rigidbody rb;
     private PlayerControls controls;
@@ -73,8 +93,9 @@ IEnumerator JumpFlip(Vector3 direction)
 
     isMoving = true;
 
-    rb.velocity = Vector3.zero;
+    rb.linearVelocity = Vector3.zero;
     rb.angularVelocity = Vector3.zero;
+    rb.isKinematic = true;
 
     float elapsed = 0f;
     float size = transform.localScale.x;
@@ -120,6 +141,18 @@ IEnumerator JumpFlip(Vector3 direction)
 
     SnapToGrid();
 
+    int faceValue = GetBottomFaceValue();
+
+    if (faceText != null)
+        faceText.text = faceValue.ToString();
+
+    // ✅ Restore physics cleanly
+    rb.isKinematic = false;
+
+    // Reset again to avoid carry-over
+    rb.linearVelocity = Vector3.zero;
+    rb.angularVelocity = Vector3.zero;
+
     isMoving = false;
 }
     
@@ -143,6 +176,35 @@ IEnumerator JumpFlip(Vector3 direction)
         rb.rotation = transform.rotation;
     }
 
+int GetBottomFaceValue()
+{
+    float maxDot = -Mathf.Infinity;
+    int detectedFace = 0;
+
+    // Check all 6 directions manually
+
+    float d;
+
+    d = Vector3.Dot(transform.up, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = topFace; }
+
+    d = Vector3.Dot(-transform.up, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = bottomFace; }
+
+    d = Vector3.Dot(transform.forward, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = frontFace; }
+
+    d = Vector3.Dot(-transform.forward, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = backFace; }
+
+    d = Vector3.Dot(transform.right, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = rightFace; }
+
+    d = Vector3.Dot(-transform.right, Vector3.down);
+    if (d > maxDot) { maxDot = d; detectedFace = leftFace; }
+
+    return detectedFace;
+}
 Vector3 GetDirection(Vector2 input)
 {
     Vector3 forward = cameraTransform.forward;
