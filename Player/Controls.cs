@@ -1,45 +1,47 @@
 using UnityEngine;
 using UnityEngine.InputSystem;
 using System.Collections;
-using UnityEngine.UI;
 using TMPro;
-
-
 
 [RequireComponent(typeof(Rigidbody))]
 public class CubeJumpFlipController : MonoBehaviour
 {
     public Transform cameraTransform;
+    public TextMeshProUGUI faceText;
+    public Animator animator;
 
-    public TextMeshProUGUI faceText; // assign in inspector
+    [Header("Particles")]
+    public GameObject flipParticlePrefab;
+    public LayerMask groundLayer;
 
-    [Header("Dice Face Mapping (Editable in Inspector)")]
+    [Header("Slip Jump")]
+    public float slipJumpDistance = 2f;
+    public float slipJumpHeight = 1.2f;
+    public float slipJumpDuration = 0.3f;
 
-    public int topFace = 1;
-    public int bottomFace = 6;
-    public int frontFace = 2;
-    public int backFace = 5;
-    public int rightFace = 3;
-    public int leftFace = 4;
-
-    
+    [Header("Dice Face Mapping")]
+    public int topFace = 1, bottomFace = 6, frontFace = 2, backFace = 5, rightFace = 3, leftFace = 4;
 
     [Header("Movement")]
-    public float moveDistance = 1f;
-    public float jumpHeight = 0.5f;
     public float moveDuration = 0.2f;
-
-    private bool isGrounded;
     public float groundCheckDistance = 1.1f;
 
-    private float inputBufferTime = 0.15f;
-    private float lastInputTime;
+    [Header("Audio")]
+    public float pitchLowRange = 0.8f;
+    public float pitchHighRange = 1.2f;
+    public AudioSource audioSource;
+    public AudioClip flipSound;
+    public AudioClip landSound;
 
     private Rigidbody rb;
     private PlayerControls controls;
 
     private Vector2 input;
     private bool isMoving;
+
+    private bool isGrounded;
+    private bool wasGrounded;
+    private RaycastHit groundHit;
 
     void Awake()
     {
@@ -50,10 +52,14 @@ public class CubeJumpFlipController : MonoBehaviour
         rb.interpolation = RigidbodyInterpolation.Interpolate;
     }
 
+    void Start()
+    {
+        animator = GetComponent<Animator>();
+    }
+
     void OnEnable()
     {
         controls.Enable();
-
         controls.Player.Move.performed += ctx => input = ctx.ReadValue<Vector2>();
         controls.Player.Move.canceled += ctx => input = Vector2.zero;
     }
@@ -70,100 +76,146 @@ public class CubeJumpFlipController : MonoBehaviour
         if (!isMoving && isGrounded && input != Vector2.zero)
         {
             Vector3 dir = GetDirection(input);
-            StartCoroutine(JumpFlip(dir));
+
+            if (input.magnitude > 0.9f)
+                StartCoroutine(SlipJump(dir));
+            else
+                StartCoroutine(JumpFlip(dir));
         }
     }
 
+    // ---------------- GROUND ----------------
+
     void CheckGround()
     {
+        wasGrounded = isGrounded;
+
         isGrounded = Physics.Raycast(
             transform.position,
             Vector3.down,
-            groundCheckDistance
+            out groundHit,
+            groundCheckDistance,
+            groundLayer
         );
+
+        if (!wasGrounded && isGrounded)
+            OnLand();
     }
 
-IEnumerator JumpFlip(Vector3 direction)
-{
-    if (!isGrounded)
+    void OnLand()
     {
+        if (audioSource && landSound)
+        {
+            audioSource.pitch = Random.Range(0.9f, 1.1f);
+            audioSource.PlayOneShot(landSound);
+        }
+
+        SpawnFlipParticles();
+    }
+
+    // ---------------- MOVEMENT ----------------
+
+    IEnumerator JumpFlip(Vector3 direction)
+    {
+        StartMove();
+
+        float size = transform.localScale.x;
+
+        Vector3 pivot = transform.position + (Vector3.down * size / 2f) + (direction * size / 2f);
+        Vector3 axis = Vector3.Cross(Vector3.up, direction);
+
+        float elapsed = 0f;
+        float lastAngle = 0f;
+
+        while (elapsed < moveDuration)
+        {
+            float t = elapsed / moveDuration;
+            float eased = t * t * (3f - 2f * t);
+
+            float angle = Mathf.Lerp(0f, 90f, eased);
+            float delta = angle - lastAngle;
+
+            transform.RotateAround(pivot, axis, delta);
+
+            lastAngle = angle;
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        EndMove();
+    }
+
+    IEnumerator SlipJump(Vector3 direction)
+    {
+        StartMove();
+
+        Vector3 startPos = transform.position;
+        Vector3 endPos = startPos + direction * slipJumpDistance;
+
+        Vector3 axis = Vector3.Cross(Vector3.up, direction);
+
+        float elapsed = 0f;
+        float lastAngle = 0f;
+
+        while (elapsed < slipJumpDuration)
+        {
+            float t = elapsed / slipJumpDuration;
+            float eased = t * t * (3f - 2f * t);
+
+            Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
+            pos.y += Mathf.Sin(eased * Mathf.PI) * slipJumpHeight;
+
+            float angle = Mathf.Lerp(0f, 180f, eased);
+            float delta = angle - lastAngle;
+
+            transform.position = pos;
+            transform.Rotate(axis, delta, Space.World);
+
+            lastAngle = angle;
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        EndMove();
+    }
+
+    void StartMove()
+    {
+        isMoving = true;
+        animator.SetBool("isMoving", true);
+
+        if (audioSource && flipSound)
+        {
+            audioSource.pitch = Random.Range(pitchLowRange, pitchHighRange);
+            audioSource.PlayOneShot(flipSound);
+        }
+
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+        rb.isKinematic = true;
+    }
+
+    void EndMove()
+    {
+        SnapToGrid();
+
+        int faceValue = GetBottomFaceValue();
+        if (faceText) faceText.text = faceValue.ToString();
+
+        rb.isKinematic = false;
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+
         isMoving = false;
-        yield break;
+        animator.SetBool("isMoving", false);
     }
 
-    isMoving = true;
+    // ---------------- UTILS ----------------
 
-    rb.linearVelocity = Vector3.zero;
-    rb.angularVelocity = Vector3.zero;
-    rb.isKinematic = true;
-
-    float elapsed = 0f;
-    float size = transform.localScale.x;
-
-    Vector3 pivot =
-        transform.position +
-        (Vector3.down * size / 2f) +
-        (direction * size / 2f);
-
-    Vector3 axis = Vector3.Cross(Vector3.up, direction);
-
-    float lastAngle = 0f;
-
-    Vector3 basePos = transform.position;
-    Quaternion baseRot = transform.rotation;
-
-    while (elapsed < moveDuration)
-    {
-        float t = elapsed / moveDuration;
-        float eased = t * t * (3f - 2f * t);
-
-        float currentAngle = Mathf.Lerp(0f, 90f, eased);
-        float delta = currentAngle - lastAngle;
-
-        // 🔥 Compute rotation manually (no cumulative drift)
-        Quaternion rot = Quaternion.AngleAxis(currentAngle, axis) * baseRot;
-
-        Vector3 pos =
-            Quaternion.AngleAxis(currentAngle, axis) * (basePos - pivot) + pivot;
-
-        // 🔥 SAFE jump arc (added AFTER rotation calc)
-        float hop = Mathf.Sin(eased * Mathf.PI) * 0.15f;
-        pos += Vector3.up * hop;
-
-        transform.position = pos;
-        transform.rotation = rot;
-
-        lastAngle = currentAngle;
-
-        elapsed += Time.deltaTime;
-        yield return null;
-    }
-
-    SnapToGrid();
-
-    int faceValue = GetBottomFaceValue();
-
-    if (faceText != null)
-        faceText.text = faceValue.ToString();
-
-    // ✅ Restore physics cleanly
-    rb.isKinematic = false;
-
-    // Reset again to avoid carry-over
-    rb.linearVelocity = Vector3.zero;
-    rb.angularVelocity = Vector3.zero;
-
-    isMoving = false;
-}
-    
     void SnapToGrid()
     {
         Vector3 p = transform.position;
-        transform.position = new Vector3(
-            Mathf.Round(p.x),
-            Mathf.Round(p.y),
-            Mathf.Round(p.z)
-        );
+        transform.position = new Vector3(Mathf.Round(p.x), Mathf.Round(p.y), Mathf.Round(p.z));
 
         Vector3 r = transform.eulerAngles;
         transform.rotation = Quaternion.Euler(
@@ -176,52 +228,51 @@ IEnumerator JumpFlip(Vector3 direction)
         rb.rotation = transform.rotation;
     }
 
-int GetBottomFaceValue()
-{
-    float maxDot = -Mathf.Infinity;
-    int detectedFace = 0;
+    int GetBottomFaceValue()
+    {
+        float maxDot = -Mathf.Infinity;
+        int detected = 0;
 
-    // Check all 6 directions manually
+        float d;
 
-    float d;
+        d = Vector3.Dot(transform.up, Vector3.down); if (d > maxDot) { maxDot = d; detected = topFace; }
+        d = Vector3.Dot(-transform.up, Vector3.down); if (d > maxDot) { maxDot = d; detected = bottomFace; }
+        d = Vector3.Dot(transform.forward, Vector3.down); if (d > maxDot) { maxDot = d; detected = frontFace; }
+        d = Vector3.Dot(-transform.forward, Vector3.down); if (d > maxDot) { maxDot = d; detected = backFace; }
+        d = Vector3.Dot(transform.right, Vector3.down); if (d > maxDot) { maxDot = d; detected = rightFace; }
+        d = Vector3.Dot(-transform.right, Vector3.down); if (d > maxDot) { maxDot = d; detected = leftFace; }
 
-    d = Vector3.Dot(transform.up, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = topFace; }
+        return detected;
+    }
 
-    d = Vector3.Dot(-transform.up, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = bottomFace; }
+    void SpawnFlipParticles()
+    {
+        if (!isGrounded || flipParticlePrefab == null) return;
 
-    d = Vector3.Dot(transform.forward, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = frontFace; }
+        GameObject fx = Instantiate(flipParticlePrefab, groundHit.point, Quaternion.identity);
 
-    d = Vector3.Dot(-transform.forward, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = backFace; }
+        ParticleSystem ps = fx.GetComponent<ParticleSystem>();
+        if (ps != null)
+            Destroy(fx, ps.main.duration + ps.main.startLifetime.constantMax);
+        else
+            Destroy(fx, 2f);
+    }
 
-    d = Vector3.Dot(transform.right, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = rightFace; }
+    Vector3 GetDirection(Vector2 input)
+    {
+        Vector3 forward = cameraTransform.forward;
+        Vector3 right = cameraTransform.right;
 
-    d = Vector3.Dot(-transform.right, Vector3.down);
-    if (d > maxDot) { maxDot = d; detectedFace = leftFace; }
+        forward.y = 0;
+        right.y = 0;
 
-    return detectedFace;
-}
-Vector3 GetDirection(Vector2 input)
-{
-    Vector3 forward = cameraTransform.forward;
-    Vector3 right = cameraTransform.right;
+        forward.Normalize();
+        right.Normalize();
 
-    forward.y = 0;
-    right.y = 0;
+        Vector3 dir = forward * input.y + right * input.x;
 
-    forward.Normalize();
-    right.Normalize();
-
-    Vector3 rawDir = forward * input.y + right * input.x;
-
-    // 🔥 HARD SNAP (no diagonals EVER)
-    if (Mathf.Abs(rawDir.x) > Mathf.Abs(rawDir.z))
-        return rawDir.x > 0 ? Vector3.right : Vector3.left;
-    else
-        return rawDir.z > 0 ? Vector3.forward : Vector3.back;
-}
+        return Mathf.Abs(dir.x) > Mathf.Abs(dir.z)
+            ? (dir.x > 0 ? Vector3.right : Vector3.left)
+            : (dir.z > 0 ? Vector3.forward : Vector3.back);
+    }
 }
