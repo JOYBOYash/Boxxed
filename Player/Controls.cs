@@ -16,6 +16,10 @@ public class CubeJumpFlipController : MonoBehaviour
     public Transform uiRig;
     public Vector3 rigOffset = new Vector3(0, 2f, 0);
 
+    [Header("UI Rotation Control")]
+    public bool followCameraRotation = true;
+    public Vector3 uiRotationOffset; // 🔥 FULL XYZ CONTROL
+
     public Image upArrow;
     public Image downArrow;
     public Image leftArrow;
@@ -26,13 +30,22 @@ public class CubeJumpFlipController : MonoBehaviour
 
     private float blinkTimer;
 
+    // ---------------- DASH FX ----------------
+    [Header("Dash FX")]
+    public float dashShakeIntensity = 0.15f;
+    public float dashShakeDuration = 0.15f;
+
+    public float dashZoomAmount = 1.5f;
+    public float dashZoomDuration = 0.15f;
+
+    private Vector3 camOriginalPos;
+
     // ---------------- PARTICLES ----------------
     [Header("Particles")]
     public GameObject flipParticlePrefab;
     public LayerMask groundLayer;
 
     // ---------------- INPUT ----------------
-    [Header("Mobile Input")]
     private bool upPressed, downPressed, leftPressed, rightPressed;
 
     public void OnUpPressed() { upPressed = true; TryTriggerMove(Vector2.up); }
@@ -46,24 +59,19 @@ public class CubeJumpFlipController : MonoBehaviour
     public void OnRightReleased() => rightPressed = false;
 
     // ---------------- MOVEMENT ----------------
-    [Header("Slip Jump")]
+    [Header("Movement")]
+    public float moveDuration = 0.2f;
     public float slipJumpDistance = 2f;
     public float slipJumpHeight = 1.2f;
     public float slipJumpDuration = 0.3f;
-
-    [Header("Movement")]
-    public float moveDuration = 0.2f;
     public float groundCheckDistance = 1.1f;
 
-    // 🔥 FIXED SIZE SYSTEM
     [Header("Dice Size")]
     public float diceSize = 1f;
 
-    // ---------------- DICE ----------------
     [Header("Dice Faces")]
     public int topFace = 1, bottomFace = 6, frontFace = 2, backFace = 5, rightFace = 3, leftFace = 4;
 
-    // ---------------- AUDIO ----------------
     [Header("Audio")]
     public AudioSource audioSource;
     public AudioClip flipSound;
@@ -71,20 +79,39 @@ public class CubeJumpFlipController : MonoBehaviour
 
     private bool canPlayMoveSound = true;
 
-    // ---------------- INTERNAL ----------------
     private Rigidbody rb;
     private PlayerControls controls;
 
     private Vector2 input;
     private bool isMoving;
+    private bool isBoosting;
 
     private bool isGrounded, wasGrounded;
     private RaycastHit groundHit;
 
-    // 🔥 SCALE FIX (INSPECTOR WORKS NOW)
+    // ---------------- SCALE FIX ----------------
+    private Vector3 fixedScale;
+
     void OnValidate()
     {
-        transform.localScale = Vector3.one * diceSize;
+        ApplyScale();
+    }
+
+    void Start()
+    {
+        ApplyScale();
+    }
+
+    void LateUpdate()
+    {
+        if (transform.localScale != fixedScale)
+            transform.localScale = fixedScale;
+    }
+
+    void ApplyScale()
+    {
+        fixedScale = Vector3.one * diceSize;
+        transform.localScale = fixedScale;
     }
 
     void Awake()
@@ -114,15 +141,13 @@ public class CubeJumpFlipController : MonoBehaviour
         HandleUI();
         UpdateUIRigPosition();
 
-        if (!isMoving && isGrounded && input != Vector2.zero)
+        if (!isMoving && !isBoosting && isGrounded && input != Vector2.zero)
         {
             TryTriggerMove(input);
         }
     }
 
-    int GetTopFaceValue(int bottom) => 7 - bottom;
-
-    // ---------------- UI ----------------
+    // ---------------- UI RIG ----------------
     void UpdateUIRigPosition()
     {
         if (!uiRig) return;
@@ -130,7 +155,12 @@ public class CubeJumpFlipController : MonoBehaviour
         uiRig.position = transform.position + rigOffset;
 
         if (Camera.main != null)
-            uiRig.forward = Camera.main.transform.forward;
+        {
+            if (followCameraRotation)
+                uiRig.forward = Camera.main.transform.forward;
+
+            uiRig.rotation *= Quaternion.Euler(uiRotationOffset);
+        }
     }
 
     void HandleUI()
@@ -169,13 +199,7 @@ public class CubeJumpFlipController : MonoBehaviour
     {
         wasGrounded = isGrounded;
 
-        isGrounded = Physics.Raycast(
-            transform.position,
-            Vector3.down,
-            out groundHit,
-            groundCheckDistance,
-            groundLayer
-        );
+        isGrounded = Physics.Raycast(transform.position, Vector3.down, out groundHit, groundCheckDistance, groundLayer);
 
         if (!wasGrounded && isGrounded)
             OnLand();
@@ -189,10 +213,10 @@ public class CubeJumpFlipController : MonoBehaviour
         SpawnFlipParticles();
     }
 
-    // ---------------- INPUT ----------------
+    // ---------------- MOVEMENT ----------------
     void TryTriggerMove(Vector2 dirInput)
     {
-        if (isMoving || !isGrounded) return;
+        if (isMoving || isBoosting || !isGrounded) return;
 
         Vector3 dir = GetDirection(dirInput);
 
@@ -202,7 +226,6 @@ public class CubeJumpFlipController : MonoBehaviour
             StartCoroutine(JumpFlip(dir));
     }
 
-    // ---------------- MOVEMENT ----------------
     IEnumerator JumpFlip(Vector3 direction)
     {
         StartMove();
@@ -265,17 +288,20 @@ public class CubeJumpFlipController : MonoBehaviour
         EndMove();
     }
 
-    // 🔥 NEW DASH BOOST (REPLACES GLITCHY ROLL)
     IEnumerator TileBoost(int steps)
     {
+        isBoosting = true;
         isMoving = true;
 
-        // THEN switch to kinematic
         rb.isKinematic = true;
 
-        Vector3 dir = GetDirection(Vector2.right);
+        StartCoroutine(DashCameraFX());
+        StartCoroutine(DashZoomFX());
 
-        Vector3 startPos = transform.position;
+        Vector3 startPos = SnapPosition(transform.position);
+        transform.position = startPos;
+
+        Vector3 dir = GetDirection(Vector2.right);
         Vector3 endPos = startPos + dir * steps;
 
         float duration = 0.15f * steps;
@@ -299,7 +325,71 @@ public class CubeJumpFlipController : MonoBehaviour
 
         rb.isKinematic = false;
 
+        isBoosting = false;
         isMoving = false;
+
+        animator.SetBool("isMoving", false);
+    }
+
+    IEnumerator DashCameraFX()
+    {
+        if (Camera.main == null) yield break;
+
+        Transform cam = Camera.main.transform;
+        camOriginalPos = cam.localPosition;
+
+        float elapsed = 0f;
+
+        while (elapsed < dashShakeDuration)
+        {
+            float x = Random.Range(-1f, 1f) * dashShakeIntensity;
+            float y = Random.Range(-1f, 1f) * dashShakeIntensity;
+
+            cam.localPosition = camOriginalPos + new Vector3(x, y, 0);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        cam.localPosition = camOriginalPos;
+    }
+
+    IEnumerator DashZoomFX()
+    {
+        if (Camera.main == null) yield break;
+
+        Transform cam = Camera.main.transform;
+
+        Vector3 start = cam.position;
+        Vector3 zoomTarget = cam.position + cam.forward * dashZoomAmount;
+
+        float elapsed = 0f;
+
+        while (elapsed < dashZoomDuration)
+        {
+            float t = elapsed / dashZoomDuration;
+            float eased = t * t * (3f - 2f * t);
+
+            cam.position = Vector3.Lerp(start, zoomTarget, eased);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        elapsed = 0f;
+
+        while (elapsed < dashZoomDuration)
+        {
+            float t = elapsed / dashZoomDuration;
+            float eased = t * t * (3f - 2f * t);
+
+            cam.position = Vector3.Lerp(zoomTarget, start, eased);
+
+            elapsed += Time.deltaTime;
+            yield return null;
+        }
+
+        cam.position = start;
     }
 
     void StartMove()
@@ -327,51 +417,54 @@ public class CubeJumpFlipController : MonoBehaviour
         SnapToGrid();
 
         int bottom = GetBottomFaceValue();
-        int top = GetTopFaceValue(bottom);
+        int top = 7 - bottom;
 
         if (faceText) faceText.text = top.ToString();
 
-        CheckTileBoost(top);
+        bool boosted = CheckTileBoost(top);
 
-        rb.isKinematic = false;
-        rb.linearVelocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
+        if (!boosted)
+        {
+            rb.isKinematic = false;
+            rb.linearVelocity = Vector3.zero;
+            rb.angularVelocity = Vector3.zero;
 
-        isMoving = false;
-        animator.SetBool("isMoving", false);
+            isMoving = false;
+            animator.SetBool("isMoving", false);
+        }
     }
 
-    void CheckTileBoost(int topFace)
+    bool CheckTileBoost(int topFace)
     {
-        if (!isGrounded) return;
+        if (!isGrounded) return false;
 
         DiceBoostTile tile = groundHit.collider.GetComponent<DiceBoostTile>();
 
         if (tile != null && tile.TryActivate(topFace))
         {
             StartCoroutine(TileBoost(tile.boostSteps));
+            return true;
         }
+
+        return false;
+    }
+
+    Vector3 SnapPosition(Vector3 p)
+    {
+        return new Vector3(Mathf.Round(p.x), Mathf.Round(p.y), Mathf.Round(p.z));
     }
 
     void SnapToGrid()
     {
-        // 🔥 Position snap (perfect grid alignment)
-        Vector3 p = transform.position;
-        p.x = Mathf.Round(p.x);
-        p.y = Mathf.Round(p.y);
-        p.z = Mathf.Round(p.z);
+        transform.position = SnapPosition(transform.position);
 
-        transform.position = p;
-
-        // 🔥 Rotation snap (clean dice faces)
         Vector3 r = transform.eulerAngles;
-        r.x = Mathf.Round(r.x / 90f) * 90f;
-        r.y = Mathf.Round(r.y / 90f) * 90f;
-        r.z = Mathf.Round(r.z / 90f) * 90f;
+        transform.rotation = Quaternion.Euler(
+            Mathf.Round(r.x / 90f) * 90f,
+            Mathf.Round(r.y / 90f) * 90f,
+            Mathf.Round(r.z / 90f) * 90f
+        );
 
-        transform.rotation = Quaternion.Euler(r);
-
-        // 🔥 Sync Rigidbody (IMPORTANT)
         rb.position = transform.position;
         rb.rotation = transform.rotation;
     }

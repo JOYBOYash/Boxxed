@@ -1,7 +1,7 @@
 using UnityEngine;
 using System.Collections.Generic;
 
-public class LinearExactIslandGenerator : MonoBehaviour
+public class ProceduralIslandGenerator : MonoBehaviour
 {
     [Header("References")]
     public Transform player;
@@ -11,11 +11,16 @@ public class LinearExactIslandGenerator : MonoBehaviour
     public GameObject[] islandPrefabs;
 
     [Header("Blocks Around Player")]
-    public int islandsAhead = 3;
+    public int islandsAhead = 5;
     public int islandsBehind = 3;
 
     [Header("Spacing")]
     public float extraGap = 0.5f;
+
+    [Header("Procedural Settings")]
+    public float heightVariation = 2f;     // 🔥 up/down variation
+    public float sideVariation = 3f;       // 🔥 zig-zag
+    public float smoothness = 0.3f;        // 🔥 smooth curve
 
     private Dictionary<int, GameObject> spawned = new Dictionary<int, GameObject>();
 
@@ -43,7 +48,7 @@ public class LinearExactIslandGenerator : MonoBehaviour
         int minIndex = playerIndex - islandsBehind;
         int maxIndex = playerIndex + islandsAhead;
 
-        // 🔥 SPAWN
+        // SPAWN
         for (int i = minIndex; i <= maxIndex; i++)
         {
             if (!spawned.ContainsKey(i))
@@ -52,7 +57,7 @@ public class LinearExactIslandGenerator : MonoBehaviour
             }
         }
 
-        // 🔥 CLEANUP
+        // CLEANUP
         List<int> toRemove = new List<int>();
 
         foreach (var kvp in spawned)
@@ -89,11 +94,22 @@ public class LinearExactIslandGenerator : MonoBehaviour
 
         float height = size.y;
 
+        // 🔥 BASE FORWARD POSITION
         float spawnX = index * blockWidth;
 
-        float spawnY = goldenLine.position.y - (height / 2f);
+        // 🔥 SMOOTH HEIGHT USING PERLIN NOISE
+        float noiseY = Mathf.PerlinNoise(index * smoothness, 0f);
+        float heightOffset = (noiseY - 0.5f) * heightVariation;
 
-        Vector3 spawnPos = new Vector3(spawnX, spawnY, goldenLine.position.z);
+        float spawnY = goldenLine.position.y + heightOffset - (height / 2f);
+
+        // 🔥 SIDE ZIG-ZAG (smooth curve)
+        float noiseZ = Mathf.PerlinNoise(0f, index * smoothness);
+        float sideOffset = (noiseZ - 0.5f) * sideVariation;
+
+        float spawnZ = goldenLine.position.z + sideOffset;
+
+        Vector3 spawnPos = new Vector3(spawnX, spawnY, spawnZ);
 
         GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
 
