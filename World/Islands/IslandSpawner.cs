@@ -4,8 +4,8 @@ using System.Collections.Generic;
 public class LinearExactIslandGenerator : MonoBehaviour
 {
     [Header("References")]
-    public Transform player;           // 🔥 actual player (movement driver)
-    public Transform goldenLine;       // 🔥 ONLY used for Y alignment
+    public Transform player;
+    public Transform goldenLine;
 
     [Header("Prefabs")]
     public GameObject[] islandPrefabs;
@@ -34,19 +34,16 @@ public class LinearExactIslandGenerator : MonoBehaviour
         ManageIslands();
     }
 
-    // ---------------- CORE SYSTEM ----------------
-
     void ManageIslands()
     {
         float playerX = player.position.x;
 
-        // 🔥 Correct index based on PLAYER (not golden line)
         int playerIndex = Mathf.FloorToInt(playerX / blockWidth);
 
         int minIndex = playerIndex - islandsBehind;
         int maxIndex = playerIndex + islandsAhead;
 
-        // 🔥 SPAWN REQUIRED ISLANDS
+        // 🔥 SPAWN
         for (int i = minIndex; i <= maxIndex; i++)
         {
             if (!spawned.ContainsKey(i))
@@ -55,7 +52,7 @@ public class LinearExactIslandGenerator : MonoBehaviour
             }
         }
 
-        // 🔥 CLEANUP OLD ISLANDS
+        // 🔥 CLEANUP
         List<int> toRemove = new List<int>();
 
         foreach (var kvp in spawned)
@@ -75,56 +72,33 @@ public class LinearExactIslandGenerator : MonoBehaviour
         }
     }
 
-    // ---------------- SPAWN ----------------
-void SpawnIsland(int index)
-{
-    // 🔥 Prevent duplicate spawn by index (extra safety)
-    if (spawned.ContainsKey(index))
-        return;
-
-    GameObject prefab = islandPrefabs[Random.Range(0, islandPrefabs.Length)];
-
-    Renderer rend = prefab.GetComponentInChildren<Renderer>();
-    if (rend == null)
+    void SpawnIsland(int index)
     {
-        Debug.LogError("Prefab missing Renderer!");
-        return;
-    }
+        if (spawned.ContainsKey(index)) return;
 
-    Vector3 size = rend.bounds.size;
+        GameObject prefab = islandPrefabs[Random.Range(0, islandPrefabs.Length)];
 
-    float width = size.x;
-    float height = size.y;
-
-    float spawnX = index * blockWidth;
-
-    // 🔥 EXTRA SAFETY: check if something already exists at this position
-    float checkRadius = width * 0.45f;
-
-    Collider[] hits = Physics.OverlapSphere(
-        new Vector3(spawnX, goldenLine.position.y, goldenLine.position.z),
-        checkRadius
-    );
-
-    foreach (var hit in hits)
-    {
-        if (hit.gameObject != null && hit.gameObject != this.gameObject)
+        Renderer rend = prefab.GetComponentInChildren<Renderer>();
+        if (rend == null)
         {
-            // 🔥 Something already exists here → skip spawn
+            Debug.LogError("Prefab missing Renderer!");
             return;
         }
+
+        Vector3 size = rend.bounds.size;
+
+        float height = size.y;
+
+        float spawnX = index * blockWidth;
+
+        float spawnY = goldenLine.position.y - (height / 2f);
+
+        Vector3 spawnPos = new Vector3(spawnX, spawnY, goldenLine.position.z);
+
+        GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
+
+        spawned.Add(index, island);
     }
-
-    // 🔥 Y alignment (unchanged)
-    float spawnY = goldenLine.position.y - (height / 2f);
-
-    Vector3 spawnPos = new Vector3(spawnX, spawnY, goldenLine.position.z);
-
-    GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
-
-    spawned.Add(index, island);
-}
-    // ---------------- INIT ----------------
 
     void CalculateBlockWidth()
     {
