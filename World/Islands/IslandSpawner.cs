@@ -22,6 +22,12 @@ public class ProceduralIslandGenerator : MonoBehaviour
     public float sideVariation = 3f;       // 🔥 zig-zag
     public float smoothness = 0.3f;        // 🔥 smooth curve
 
+
+    [Header("Gems")]
+    public GameObject gemPrefab;
+    [Range(0f, 1f)] public float gemSpawnChance = 0.4f;
+    public int maxGemsPerIsland = 2;
+    public float gemHeightOffset = 0.5f;
     private Dictionary<int, GameObject> spawned = new Dictionary<int, GameObject>();
 
     private float blockWidth = 10f;
@@ -113,6 +119,9 @@ public class ProceduralIslandGenerator : MonoBehaviour
 
         GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
 
+        // 🔥 SPAWN GEMS ON THIS ISLAND
+        SpawnGems(island, size);
+
         spawned.Add(index, island);
     }
 
@@ -122,5 +131,25 @@ public class ProceduralIslandGenerator : MonoBehaviour
 
         Renderer r = islandPrefabs[0].GetComponentInChildren<Renderer>();
         blockWidth = r.bounds.size.x + extraGap;
+    }
+
+    void SpawnGems(GameObject island, Vector3 size)
+    {
+        if (gemPrefab == null) return;
+
+        if (Random.value > gemSpawnChance) return;
+
+        int gemCount = Random.Range(1, maxGemsPerIsland + 1);
+
+        for (int i = 0; i < gemCount; i++)
+        {
+            float randomX = Random.Range(-size.x * 0.4f, size.x * 0.4f);
+            float randomZ = Random.Range(-size.z * 0.4f, size.z * 0.4f);
+
+            Vector3 spawnPos = island.transform.position +
+                            new Vector3(randomX, size.y / 2f + gemHeightOffset, randomZ);
+
+            Instantiate(gemPrefab, spawnPos, Quaternion.identity, island.transform);
+        }
     }
 }
