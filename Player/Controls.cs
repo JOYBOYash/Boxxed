@@ -40,6 +40,14 @@ public class CubeJumpFlipController : MonoBehaviour
 
     private Vector3 camOriginalPos;
 
+    [Header("Dash Trail")]
+    public GameObject ghostPrefab;
+    public float ghostSpawnDelay = 0.05f;
+    public float ghostLifetime = 0.3f;
+
+    [Header("Movement Smoothness")]
+    public AnimationCurve movementCurve = AnimationCurve.EaseInOut(0, 0, 1, 1);
+
     // ---------------- PARTICLES ----------------
     [Header("Particles")]
     public GameObject flipParticlePrefab;
@@ -234,67 +242,67 @@ public class CubeJumpFlipController : MonoBehaviour
             StartCoroutine(JumpFlip(dir));
     }
 
-    IEnumerator JumpFlip(Vector3 direction)
+IEnumerator JumpFlip(Vector3 direction)
+{
+    StartMove();
+
+    float size = diceSize;
+    Vector3 pivot = transform.position + (Vector3.down * size / 2f) + (direction * size / 2f);
+    Vector3 axis = Vector3.Cross(Vector3.up, direction);
+
+    float elapsed = 0f;
+    float lastAngle = 0f;
+
+    while (elapsed < moveDuration)
     {
-        StartMove();
+        float t = elapsed / moveDuration;
+        float eased = movementCurve.Evaluate(t); // 🔥 smoother
 
-        float size = diceSize;
-        Vector3 pivot = transform.position + (Vector3.down * size / 2f) + (direction * size / 2f);
-        Vector3 axis = Vector3.Cross(Vector3.up, direction);
+        float angle = Mathf.Lerp(0f, 90f, eased);
+        float delta = angle - lastAngle;
 
-        float elapsed = 0f;
-        float lastAngle = 0f;
+        transform.RotateAround(pivot, axis, delta);
 
-        while (elapsed < moveDuration)
-        {
-            float t = elapsed / moveDuration;
-            float eased = t * t * (3f - 2f * t);
-
-            float angle = Mathf.Lerp(0f, 90f, eased);
-            float delta = angle - lastAngle;
-
-            transform.RotateAround(pivot, axis, delta);
-
-            lastAngle = angle;
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        EndMove();
+        lastAngle = angle;
+        elapsed += Time.deltaTime;
+        yield return null;
     }
 
-    IEnumerator SlipJump(Vector3 direction)
+    EndMove();
+}
+
+IEnumerator SlipJump(Vector3 direction)
+{
+    StartMove();
+
+    Vector3 startPos = transform.position;
+    Vector3 endPos = startPos + direction * slipJumpDistance;
+    Vector3 axis = Vector3.Cross(Vector3.up, direction);
+
+    float elapsed = 0f;
+    float lastAngle = 0f;
+
+    while (elapsed < slipJumpDuration)
     {
-        StartMove();
+        float t = elapsed / slipJumpDuration;
+        float eased = movementCurve.Evaluate(t);
 
-        Vector3 startPos = transform.position;
-        Vector3 endPos = startPos + direction * slipJumpDistance;
-        Vector3 axis = Vector3.Cross(Vector3.up, direction);
+        Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
+        pos.y += Mathf.Sin(eased * Mathf.PI) * slipJumpHeight;
 
-        float elapsed = 0f;
-        float lastAngle = 0f;
+        float angle = Mathf.Lerp(0f, 180f, eased);
+        float delta = angle - lastAngle;
 
-        while (elapsed < slipJumpDuration)
-        {
-            float t = elapsed / slipJumpDuration;
-            float eased = t * t * (3f - 2f * t);
+        transform.position = pos;
+        transform.Rotate(axis, delta, Space.World);
 
-            Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
-            pos.y += Mathf.Sin(eased * Mathf.PI) * slipJumpHeight;
-
-            float angle = Mathf.Lerp(0f, 180f, eased);
-            float delta = angle - lastAngle;
-
-            transform.position = pos;
-            transform.Rotate(axis, delta, Space.World);
-
-            lastAngle = angle;
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        EndMove();
+        lastAngle = angle;
+        elapsed += Time.deltaTime;
+        yield return null;
     }
+
+    EndMove();
+}
 IEnumerator TileBoost(int steps)
 {
     isBoosting = true;
@@ -302,32 +310,29 @@ IEnumerator TileBoost(int steps)
 
     rb.isKinematic = true;
 
-    // 🔊 DASH SOUND
     if (audioSource && dashSound)
         audioSource.PlayOneShot(dashSound);
 
-    // 🎥 CAMERA FX
     StartCoroutine(DashCameraFX());
     StartCoroutine(DashZoomFX());
+    StartCoroutine(SpawnGhostTrail());
 
     Vector3 startPos = SnapPosition(transform.position);
     transform.position = startPos;
 
-    // 🔥 FIXED DIRECTION
     Vector3 dir = lastMoveDirection;
-
     Vector3 endPos = startPos + dir * steps;
 
-    float duration = 0.15f * steps;
+    float duration = 0.12f * steps; // 🔥 faster = better feel
     float elapsed = 0f;
 
     while (elapsed < duration)
     {
         float t = elapsed / duration;
-        float eased = t * t * (3f - 2f * t);
+        float eased = movementCurve.Evaluate(t);
 
         Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
-        pos.y += Mathf.Sin(eased * Mathf.PI) * 0.2f;
+        pos.y += Mathf.Sin(eased * Mathf.PI) * 0.25f;
 
         transform.position = pos;
 
@@ -344,28 +349,32 @@ IEnumerator TileBoost(int steps)
 
     animator.SetBool("isMoving", false);
 }
-    IEnumerator DashCameraFX()
+IEnumerator DashCameraFX()
+{
+    if (Camera.main == null) yield break;
+
+    Transform cam = Camera.main.transform;
+    camOriginalPos = cam.localPosition;
+
+    float elapsed = 0f;
+
+    while (elapsed < dashShakeDuration)
     {
-        if (Camera.main == null) yield break;
+        float t = elapsed / dashShakeDuration;
 
-        Transform cam = Camera.main.transform;
-        camOriginalPos = cam.localPosition;
+        float strength = Mathf.Lerp(dashShakeIntensity, 0f, t);
 
-        float elapsed = 0f;
+        float x = Mathf.Sin(Time.time * 80f) * strength;
+        float y = Mathf.Cos(Time.time * 90f) * strength;
 
-        while (elapsed < dashShakeDuration)
-        {
-            float x = Random.Range(-1f, 1f) * dashShakeIntensity;
-            float y = Random.Range(-1f, 1f) * dashShakeIntensity;
+        cam.localPosition = camOriginalPos + new Vector3(x, y, 0);
 
-            cam.localPosition = camOriginalPos + new Vector3(x, y, 0);
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        cam.localPosition = camOriginalPos;
+        elapsed += Time.deltaTime;
+        yield return null;
     }
+
+    cam.localPosition = camOriginalPos;
+}
 IEnumerator DashZoomFX()
 {
     if (Camera.main == null) yield break;
@@ -405,6 +414,45 @@ IEnumerator DashZoomFX()
     }
 
     camFollow.orthoZoom = originalZoom;
+}
+
+IEnumerator SpawnGhostTrail()
+{
+    if (ghostPrefab == null) yield break;
+
+    while (isBoosting)
+    {
+        GameObject ghost = Instantiate(ghostPrefab, transform.position, transform.rotation);
+
+        StartCoroutine(FadeGhost(ghost));
+
+        yield return new WaitForSeconds(ghostSpawnDelay);
+    }
+}
+
+IEnumerator FadeGhost(GameObject ghost)
+{
+    float elapsed = 0f;
+
+    Renderer r = ghost.GetComponentInChildren<Renderer>();
+    if (r == null) yield break;
+
+    Material mat = r.material;
+    Color start = mat.color;
+
+    while (elapsed < ghostLifetime)
+    {
+        float t = elapsed / ghostLifetime;
+
+        Color c = start;
+        c.a = Mathf.Lerp(1f, 0f, t);
+        mat.color = c;
+
+        elapsed += Time.deltaTime;
+        yield return null;
+    }
+
+    Destroy(ghost);
 }
     void StartMove()
     {
