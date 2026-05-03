@@ -77,6 +77,12 @@ public class CubeJumpFlipController : MonoBehaviour
     public AudioClip flipSound;
     public AudioClip landSound;
 
+    // ---------------- DASH AUDIO ----------------
+    [Header("Dash Audio")]
+    public AudioClip dashSound;
+
+    private Vector3 lastMoveDirection;
+
     private bool canPlayMoveSound = true;
 
     private Rigidbody rb;
@@ -220,6 +226,8 @@ public class CubeJumpFlipController : MonoBehaviour
 
         Vector3 dir = GetDirection(dirInput);
 
+        lastMoveDirection = dir; // 🔥 STORE DIRECTION
+
         if (dirInput.magnitude > 0.9f)
             StartCoroutine(SlipJump(dir));
         else
@@ -287,50 +295,55 @@ public class CubeJumpFlipController : MonoBehaviour
 
         EndMove();
     }
+IEnumerator TileBoost(int steps)
+{
+    isBoosting = true;
+    isMoving = true;
 
-    IEnumerator TileBoost(int steps)
+    rb.isKinematic = true;
+
+    // 🔊 DASH SOUND
+    if (audioSource && dashSound)
+        audioSource.PlayOneShot(dashSound);
+
+    // 🎥 CAMERA FX
+    StartCoroutine(DashCameraFX());
+    StartCoroutine(DashZoomFX());
+
+    Vector3 startPos = SnapPosition(transform.position);
+    transform.position = startPos;
+
+    // 🔥 FIXED DIRECTION
+    Vector3 dir = lastMoveDirection;
+
+    Vector3 endPos = startPos + dir * steps;
+
+    float duration = 0.15f * steps;
+    float elapsed = 0f;
+
+    while (elapsed < duration)
     {
-        isBoosting = true;
-        isMoving = true;
+        float t = elapsed / duration;
+        float eased = t * t * (3f - 2f * t);
 
-        rb.isKinematic = true;
+        Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
+        pos.y += Mathf.Sin(eased * Mathf.PI) * 0.2f;
 
-        StartCoroutine(DashCameraFX());
-        StartCoroutine(DashZoomFX());
+        transform.position = pos;
 
-        Vector3 startPos = SnapPosition(transform.position);
-        transform.position = startPos;
-
-        Vector3 dir = GetDirection(Vector2.right);
-        Vector3 endPos = startPos + dir * steps;
-
-        float duration = 0.15f * steps;
-        float elapsed = 0f;
-
-        while (elapsed < duration)
-        {
-            float t = elapsed / duration;
-            float eased = t * t * (3f - 2f * t);
-
-            Vector3 pos = Vector3.Lerp(startPos, endPos, eased);
-            pos.y += Mathf.Sin(eased * Mathf.PI) * 0.2f;
-
-            transform.position = pos;
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        SnapToGrid();
-
-        rb.isKinematic = false;
-
-        isBoosting = false;
-        isMoving = false;
-
-        animator.SetBool("isMoving", false);
+        elapsed += Time.deltaTime;
+        yield return null;
     }
 
+    SnapToGrid();
+
+    rb.isKinematic = false;
+
+    isBoosting = false;
+    isMoving = false;
+
+    animator.SetBool("isMoving", false);
+}
     IEnumerator DashCameraFX()
     {
         if (Camera.main == null) yield break;
@@ -353,45 +366,46 @@ public class CubeJumpFlipController : MonoBehaviour
 
         cam.localPosition = camOriginalPos;
     }
+IEnumerator DashZoomFX()
+{
+    if (Camera.main == null) yield break;
 
-    IEnumerator DashZoomFX()
+    AdvancedCameraFollow camFollow = Camera.main.GetComponent<AdvancedCameraFollow>();
+    if (camFollow == null) yield break;
+
+    float originalZoom = camFollow.orthoZoom;
+    float zoomed = originalZoom - 5f; // 🔥 REQUIRED
+
+    float elapsed = 0f;
+
+    // ZOOM IN
+    while (elapsed < dashZoomDuration)
     {
-        if (Camera.main == null) yield break;
+        float t = elapsed / dashZoomDuration;
+        float eased = t * t * (3f - 2f * t);
 
-        Transform cam = Camera.main.transform;
+        camFollow.orthoZoom = Mathf.Lerp(originalZoom, zoomed, eased);
 
-        Vector3 start = cam.position;
-        Vector3 zoomTarget = cam.position + cam.forward * dashZoomAmount;
-
-        float elapsed = 0f;
-
-        while (elapsed < dashZoomDuration)
-        {
-            float t = elapsed / dashZoomDuration;
-            float eased = t * t * (3f - 2f * t);
-
-            cam.position = Vector3.Lerp(start, zoomTarget, eased);
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        elapsed = 0f;
-
-        while (elapsed < dashZoomDuration)
-        {
-            float t = elapsed / dashZoomDuration;
-            float eased = t * t * (3f - 2f * t);
-
-            cam.position = Vector3.Lerp(zoomTarget, start, eased);
-
-            elapsed += Time.deltaTime;
-            yield return null;
-        }
-
-        cam.position = start;
+        elapsed += Time.deltaTime;
+        yield return null;
     }
 
+    elapsed = 0f;
+
+    // ZOOM OUT
+    while (elapsed < dashZoomDuration)
+    {
+        float t = elapsed / dashZoomDuration;
+        float eased = t * t * (3f - 2f * t);
+
+        camFollow.orthoZoom = Mathf.Lerp(zoomed, originalZoom, eased);
+
+        elapsed += Time.deltaTime;
+        yield return null;
+    }
+
+    camFollow.orthoZoom = originalZoom;
+}
     void StartMove()
     {
         isMoving = true;

@@ -18,18 +18,23 @@ public class ProceduralIslandGenerator : MonoBehaviour
     public float extraGap = 0.5f;
 
     [Header("Procedural Settings")]
-    public float heightVariation = 2f;     // 🔥 up/down variation
-    public float sideVariation = 3f;       // 🔥 zig-zag
-    public float smoothness = 0.3f;        // 🔥 smooth curve
+    public float heightVariation = 2f;
+    public float sideVariation = 3f;
+    public float smoothness = 0.3f;
 
-
+    // ---------------- GEMS ----------------
     [Header("Gems")]
     public GameObject gemPrefab;
     [Range(0f, 1f)] public float gemSpawnChance = 0.4f;
     public int maxGemsPerIsland = 2;
     public float gemHeightOffset = 0.5f;
-    private Dictionary<int, GameObject> spawned = new Dictionary<int, GameObject>();
 
+    [Header("Gem Rotation")]
+    public Vector3 gemRotationOffset;          // 🔥 FULL XYZ CONTROL
+    public bool randomizeYRotation = true;     // 🔥 variation
+    public bool alignToPathDirection = false;  // 🔥 face forward
+
+    private Dictionary<int, GameObject> spawned = new Dictionary<int, GameObject>();
     private float blockWidth = 10f;
 
     void Start()
@@ -45,6 +50,8 @@ public class ProceduralIslandGenerator : MonoBehaviour
         ManageIslands();
     }
 
+    // ---------------- CORE ----------------
+
     void ManageIslands()
     {
         float playerX = player.position.x;
@@ -54,7 +61,7 @@ public class ProceduralIslandGenerator : MonoBehaviour
         int minIndex = playerIndex - islandsBehind;
         int maxIndex = playerIndex + islandsAhead;
 
-        // SPAWN
+        // 🔥 SPAWN
         for (int i = minIndex; i <= maxIndex; i++)
         {
             if (!spawned.ContainsKey(i))
@@ -63,7 +70,7 @@ public class ProceduralIslandGenerator : MonoBehaviour
             }
         }
 
-        // CLEANUP
+        // 🔥 CLEANUP
         List<int> toRemove = new List<int>();
 
         foreach (var kvp in spawned)
@@ -83,6 +90,8 @@ public class ProceduralIslandGenerator : MonoBehaviour
         }
     }
 
+    // ---------------- SPAWN ISLAND ----------------
+
     void SpawnIsland(int index)
     {
         if (spawned.ContainsKey(index)) return;
@@ -97,33 +106,31 @@ public class ProceduralIslandGenerator : MonoBehaviour
         }
 
         Vector3 size = rend.bounds.size;
-
         float height = size.y;
 
-        // 🔥 BASE FORWARD POSITION
         float spawnX = index * blockWidth;
 
-        // 🔥 SMOOTH HEIGHT USING PERLIN NOISE
+        // 🔥 HEIGHT VARIATION
         float noiseY = Mathf.PerlinNoise(index * smoothness, 0f);
         float heightOffset = (noiseY - 0.5f) * heightVariation;
-
         float spawnY = goldenLine.position.y + heightOffset - (height / 2f);
 
-        // 🔥 SIDE ZIG-ZAG (smooth curve)
+        // 🔥 SIDE VARIATION
         float noiseZ = Mathf.PerlinNoise(0f, index * smoothness);
         float sideOffset = (noiseZ - 0.5f) * sideVariation;
-
         float spawnZ = goldenLine.position.z + sideOffset;
 
         Vector3 spawnPos = new Vector3(spawnX, spawnY, spawnZ);
 
         GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
 
-        // 🔥 SPAWN GEMS ON THIS ISLAND
+        // 🔥 GEMS
         SpawnGems(island, size);
 
         spawned.Add(index, island);
     }
+
+    // ---------------- BLOCK WIDTH ----------------
 
     void CalculateBlockWidth()
     {
@@ -132,6 +139,8 @@ public class ProceduralIslandGenerator : MonoBehaviour
         Renderer r = islandPrefabs[0].GetComponentInChildren<Renderer>();
         blockWidth = r.bounds.size.x + extraGap;
     }
+
+    // ---------------- GEM SPAWN ----------------
 
     void SpawnGems(GameObject island, Vector3 size)
     {
@@ -147,9 +156,26 @@ public class ProceduralIslandGenerator : MonoBehaviour
             float randomZ = Random.Range(-size.z * 0.4f, size.z * 0.4f);
 
             Vector3 spawnPos = island.transform.position +
-                            new Vector3(randomX, size.y / 2f + gemHeightOffset, randomZ);
+                new Vector3(randomX, size.y / 2f + gemHeightOffset, randomZ);
 
-            Instantiate(gemPrefab, spawnPos, Quaternion.identity, island.transform);
+            // 🔥 BASE ROTATION
+            Quaternion rotation = Quaternion.Euler(gemRotationOffset);
+
+            // 🔥 RANDOM Y ROTATION
+            if (randomizeYRotation)
+            {
+                float randomY = Random.Range(0f, 360f);
+                rotation *= Quaternion.Euler(0f, randomY, 0f);
+            }
+
+            // 🔥 ALIGN TO PATH (X direction)
+            if (alignToPathDirection)
+            {
+                Vector3 forwardDir = Vector3.right;
+                rotation = Quaternion.LookRotation(forwardDir) * Quaternion.Euler(gemRotationOffset);
+            }
+
+            Instantiate(gemPrefab, spawnPos, rotation, island.transform);
         }
     }
 }

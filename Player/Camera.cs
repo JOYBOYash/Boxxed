@@ -35,7 +35,7 @@ public class AdvancedCameraFollow : MonoBehaviour
     [Range(20f, 100f)]
     public float zoom = 60f; // perspective zoom (FOV)
 
-    [Range(2f, 20f)]
+    [Range(2f, 50f)]
     public float orthoZoom = 5f; // orthographic zoom
 
     void Start()
