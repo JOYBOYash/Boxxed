@@ -25,6 +25,11 @@ public class CubeJumpFlipController : MonoBehaviour
     public Image leftArrow;
     public Image rightArrow;
 
+    float holdTimer = 0f;
+    public float holdRepeatDelay = 0.18f; // time between moves while holding
+
+    Vector2 currentHoldInput;
+
     [Range(0.1f, 5f)] public float idleBlinkSpeed = 2f;
     [Range(0.1f, 1f)] public float inactiveAlpha = 0.3f;
 
@@ -56,15 +61,44 @@ public class CubeJumpFlipController : MonoBehaviour
     // ---------------- INPUT ----------------
     private bool upPressed, downPressed, leftPressed, rightPressed;
 
-    public void OnUpPressed() { upPressed = true; TryTriggerMove(Vector2.up); }
-    public void OnDownPressed() { downPressed = true; TryTriggerMove(Vector2.down); }
-    public void OnLeftPressed() { leftPressed = true; TryTriggerMove(Vector2.left); }
-    public void OnRightPressed() { rightPressed = true; TryTriggerMove(Vector2.right); }
+public void OnUpPressed() 
+{ 
+    upPressed = true; 
+    currentHoldInput = Vector2.up;
+    TryTriggerMove(Vector2.up);
+}
 
-    public void OnUpReleased() => upPressed = false;
-    public void OnDownReleased() => downPressed = false;
-    public void OnLeftReleased() => leftPressed = false;
-    public void OnRightReleased() => rightPressed = false;
+public void OnDownPressed() 
+{ 
+    downPressed = true; 
+    currentHoldInput = Vector2.down;
+    TryTriggerMove(Vector2.down);
+}
+
+public void OnLeftPressed() 
+{ 
+    leftPressed = true; 
+    currentHoldInput = Vector2.left;
+    TryTriggerMove(Vector2.left);
+}
+
+public void OnRightPressed() 
+{ 
+    rightPressed = true; 
+    currentHoldInput = Vector2.right;
+    TryTriggerMove(Vector2.right);
+}
+
+public void OnUpReleased() { upPressed = false; ResetHold(); }
+public void OnDownReleased() { downPressed = false; ResetHold(); }
+public void OnLeftReleased() { leftPressed = false; ResetHold(); }
+public void OnRightReleased() { rightPressed = false; ResetHold(); }
+
+void ResetHold()
+{
+    holdTimer = 0f;
+    currentHoldInput = Vector2.zero;
+}
 
     // ---------------- MOVEMENT ----------------
     [Header("Movement")]
@@ -155,10 +189,14 @@ public class CubeJumpFlipController : MonoBehaviour
         HandleUI();
         UpdateUIRigPosition();
 
-        if (!isMoving && !isBoosting && isGrounded && input != Vector2.zero)
-        {
-            TryTriggerMove(input);
-        }
+   // 🔥 KEYBOARD (unchanged smooth behavior)
+            if (!isMoving && !isBoosting && isGrounded && input != Vector2.zero)
+            {
+                TryTriggerMove(input);
+            }
+
+            // 🔥 UI HOLD SYSTEM
+            HandleHoldInput();
     }
 
     // ---------------- UI RIG ----------------
@@ -197,6 +235,21 @@ public class CubeJumpFlipController : MonoBehaviour
             SetArrowAlpha(downArrow, downPressed ? 1f : inactiveAlpha);
             SetArrowAlpha(leftArrow, leftPressed ? 1f : inactiveAlpha);
             SetArrowAlpha(rightArrow, rightPressed ? 1f : inactiveAlpha);
+        }
+    }
+
+        void HandleHoldInput()
+    {
+        if (isMoving || isBoosting || !isGrounded) return;
+
+        if (currentHoldInput == Vector2.zero) return;
+
+        holdTimer += Time.deltaTime;
+
+        if (holdTimer >= holdRepeatDelay)
+        {
+            TryTriggerMove(currentHoldInput);
+            holdTimer = 0f;
         }
     }
 
