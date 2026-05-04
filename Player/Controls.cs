@@ -139,6 +139,20 @@ void ResetHold()
     public float slipJumpDuration = 0.3f;
     public float groundCheckDistance = 1.1f;
 
+    // ---------------- SWIPE INPUT ----------------
+    [Header("Swipe Input")]
+    public bool enableSwipeInput = true;
+    public float swipeThreshold = 50f;
+
+    private Vector2 swipeStartPos;
+    private bool isSwiping;
+
+    // ---------------- UI SCALE ----------------
+    [Header("Arrow Scale FX")]
+    public float activeScale = 1.25f;
+    public float normalScale = 1f;
+    public float scaleSpeed = 10f;
+
 
     [Header("Dice Faces")]
     public int topFace = 1, bottomFace = 6, frontFace = 2, backFace = 5, rightFace = 3, leftFace = 4;
@@ -209,6 +223,7 @@ void ResetHold()
         // 🔥 STEP 1: COLLECT INPUT (DO NOT EXECUTE HERE)
         if (useJoystick || useUIButtons)
         {
+            HandleSwipeInput();
             HandleHoldInput(); // now ONLY buffers input
         }
         else
@@ -238,6 +253,76 @@ void ResetHold()
                 Vector3 fix = transform.position;
                 fix.y = expectedY;
                 transform.position = fix;
+            }
+        }
+    }
+
+    void HandleSwipeInput()
+    {
+        if (!enableSwipeInput) return;
+
+        // 🔥 TOUCH SUPPORT (mobile)
+        if (Touchscreen.current != null && Touchscreen.current.primaryTouch.press.isPressed)
+        {
+            var touch = Touchscreen.current.primaryTouch;
+
+            if (touch.press.wasPressedThisFrame)
+            {
+                swipeStartPos = touch.position.ReadValue();
+                isSwiping = true;
+            }
+
+            if (isSwiping)
+            {
+                Vector2 current = touch.position.ReadValue();
+                Vector2 delta = current - swipeStartPos;
+
+                if (delta.magnitude > swipeThreshold)
+                {
+                    Vector2 dir =
+                        Mathf.Abs(delta.x) > Mathf.Abs(delta.y)
+                        ? new Vector2(Mathf.Sign(delta.x), 0)
+                        : new Vector2(0, Mathf.Sign(delta.y));
+
+                    currentHoldInput = dir;
+                    bufferedInput = dir;
+                    hasBufferedInput = true;
+                }
+            }
+        }
+        else
+        {
+            // 🔥 MOUSE SUPPORT (Editor / PC testing)
+            if (Mouse.current != null)
+            {
+                if (Mouse.current.leftButton.wasPressedThisFrame)
+                {
+                    swipeStartPos = Mouse.current.position.ReadValue();
+                    isSwiping = true;
+                }
+
+                if (Mouse.current.leftButton.wasReleasedThisFrame)
+                {
+                    isSwiping = false;
+                }
+
+                if (isSwiping)
+                {
+                    Vector2 current = Mouse.current.position.ReadValue();
+                    Vector2 delta = current - swipeStartPos;
+
+                    if (delta.magnitude > swipeThreshold)
+                    {
+                        Vector2 dir =
+                            Mathf.Abs(delta.x) > Mathf.Abs(delta.y)
+                            ? new Vector2(Mathf.Sign(delta.x), 0)
+                            : new Vector2(0, Mathf.Sign(delta.y));
+
+                        currentHoldInput = dir;
+                        bufferedInput = dir;
+                        hasBufferedInput = true;
+                    }
+                }
             }
         }
     }
@@ -272,25 +357,52 @@ void ResetHold()
 
     void HandleUI()
     {
-        bool anyInput = upPressed || downPressed || leftPressed || rightPressed || input != Vector2.zero;
+        bool anyInput = upPressed || downPressed || leftPressed || rightPressed 
+                        || input != Vector2.zero 
+                        || currentHoldInput != Vector2.zero;
 
         if (!anyInput)
         {
             blinkTimer += Time.deltaTime * idleBlinkSpeed;
             float alpha = Mathf.Abs(Mathf.Sin(blinkTimer));
 
-            SetArrowAlpha(upArrow, alpha);
-            SetArrowAlpha(downArrow, alpha);
-            SetArrowAlpha(leftArrow, alpha);
-            SetArrowAlpha(rightArrow, alpha);
+            // 🔥 idle = no active arrow
+            SetArrowVisual(upArrow, false, alpha);
+            SetArrowVisual(downArrow, false, alpha);
+            SetArrowVisual(leftArrow, false, alpha);
+            SetArrowVisual(rightArrow, false, alpha);
         }
         else
         {
-            SetArrowAlpha(upArrow, upPressed ? 1f : inactiveAlpha);
-            SetArrowAlpha(downArrow, downPressed ? 1f : inactiveAlpha);
-            SetArrowAlpha(leftArrow, leftPressed ? 1f : inactiveAlpha);
-            SetArrowAlpha(rightArrow, rightPressed ? 1f : inactiveAlpha);
+            SetArrowVisual(upArrow, currentHoldInput == Vector2.up, 1f);
+            SetArrowVisual(downArrow, currentHoldInput == Vector2.down, 1f);
+            SetArrowVisual(leftArrow, currentHoldInput == Vector2.left, 1f);
+            SetArrowVisual(rightArrow, currentHoldInput == Vector2.right, 1f);
         }
+    }
+
+    void SetArrowVisual(Image img, bool isActive, float alphaOverride)
+    {
+        if (!img) return;
+
+        // 🔥 SCALE
+        float targetScale = isActive ? activeScale : normalScale;
+
+        img.transform.localScale = Vector3.Lerp(
+            img.transform.localScale,
+            Vector3.one * targetScale,
+            Time.deltaTime * scaleSpeed
+        );
+
+        // 🔥 ALPHA
+        Color c = img.color;
+
+        if (isActive)
+            c.a = 1f;
+        else
+            c.a = alphaOverride * inactiveAlpha;
+
+        img.color = c;
     }
 
 void HandleHoldInput()
