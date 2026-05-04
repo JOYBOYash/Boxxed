@@ -184,6 +184,8 @@ void ResetHold()
 
         rb.useGravity = true;
         rb.interpolation = RigidbodyInterpolation.Interpolate;
+        rb.collisionDetectionMode = CollisionDetectionMode.Continuous;
+        // rb.constraints = RigidbodyConstraints.FreezeRotation;
     }
 
     void OnEnable()
@@ -224,6 +226,19 @@ void ResetHold()
             hasBufferedInput = false;
 
             ExecuteMove(next);
+        }
+
+        // 🔥 ANTI-SINK FAILSAFE (FINAL DEFENSE)
+        if (isGrounded)
+        {
+            float expectedY = groundHit.point.y + (transform.localScale.y * 0.5f);
+
+            if (transform.position.y < expectedY - 0.05f)
+            {
+                Vector3 fix = transform.position;
+                fix.y = expectedY;
+                transform.position = fix;
+            }
         }
     }
 
@@ -314,15 +329,30 @@ void HandleHoldInput()
     }
 
     // ---------------- GROUND ----------------
-    void CheckGround()
+void CheckGround()
+{
+    wasGrounded = isGrounded;
+
+    float halfHeight = transform.localScale.y * 0.5f;
+
+    // 🔥 start slightly ABOVE center to avoid starting inside collider
+    Vector3 origin = transform.position + Vector3.up * 0.2f;
+
+    // 🔥 use SphereCast instead of Raycast (MUCH more stable)
+    isGrounded = Physics.SphereCast(
+        origin,
+        0.25f, // radius
+        Vector3.down,
+        out groundHit,
+        groundCheckDistance + halfHeight,
+        groundLayer
+    );
+
+    if (!wasGrounded && isGrounded)
     {
-        wasGrounded = isGrounded;
-
-        isGrounded = Physics.Raycast(transform.position, Vector3.down, out groundHit, groundCheckDistance, groundLayer);
-
-        if (!wasGrounded && isGrounded)
-            OnLand();
+        OnLand();
     }
+}
 
     void OnLand()
     {
@@ -364,7 +394,7 @@ IEnumerator JumpFlip(Vector3 direction)
         elapsed += Time.deltaTime;
         yield return null;
     }
-
+    ForceGroundSnapAndFX();
     EndMove();
 }
 
@@ -397,7 +427,7 @@ IEnumerator SlipJump(Vector3 direction)
         elapsed += Time.deltaTime;
         yield return null;
     }
-
+    ForceGroundSnapAndFX();
     EndMove();
 }
 IEnumerator TileBoost(int steps)
@@ -665,25 +695,51 @@ void EndMove()
         return new Vector3(Mathf.Round(p.x), Mathf.Round(p.y), Mathf.Round(p.z));
     }
 
-    void SnapToGrid()
+void SnapToGrid()
+{
+    Vector3 snapped = SnapPosition(transform.position);
+
+    float halfHeight = transform.localScale.y * 0.5f;
+
+    // 🔥 SAFETY: if no ground detected, DON'T snap (prevents bad data)
+    if (!isGrounded)
     {
-        Vector3 snapped = SnapPosition(transform.position);
-
-        // 🔥 FORCE GROUND ALIGNMENT
-        snapped.y = groundHit.point.y + (transform.localScale.y / 2f);
-
         transform.position = snapped;
-
-        Vector3 r = transform.eulerAngles;
-        transform.rotation = Quaternion.Euler(
-            Mathf.Round(r.x / 90f) * 90f,
-            Mathf.Round(r.y / 90f) * 90f,
-            Mathf.Round(r.z / 90f) * 90f
-        );
-
-        rb.position = transform.position;
-        rb.rotation = transform.rotation;
+        return;
     }
+
+    float targetY = groundHit.point.y + halfHeight;
+
+    // 🔥 ALWAYS FORCE Y (no conditional nonsense)
+    snapped.y = targetY;
+
+    transform.position = snapped;
+
+    // 🔥 CLEAN ROTATION
+    Vector3 r = transform.eulerAngles;
+    transform.rotation = Quaternion.Euler(
+        Mathf.Round(r.x / 90f) * 90f,
+        Mathf.Round(r.y / 90f) * 90f,
+        Mathf.Round(r.z / 90f) * 90f
+    );
+
+    rb.position = transform.position;
+    rb.rotation = transform.rotation;
+}
+
+void ForceGroundSnapAndFX()
+{
+    if (!isGrounded) return;
+
+    float halfHeight = transform.localScale.y * 0.5f;
+
+    Vector3 pos = transform.position;
+    pos.y = groundHit.point.y + halfHeight;
+    transform.position = pos;
+
+    // 🔥 ALWAYS spawn particles after movement
+    SpawnFlipParticles();
+}
 
     int GetBottomFaceValue()
     {
