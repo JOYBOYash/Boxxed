@@ -58,6 +58,33 @@ public class CubeJumpFlipController : MonoBehaviour
     public GameObject flipParticlePrefab;
     public LayerMask groundLayer;
 
+
+        // ---------------- INPUT MODE ----------------
+    [Header("Input Mode")]
+    public bool useJoystick = false;   // toggle switch
+    public bool useUIButtons = true;   // arrows
+
+    private Vector2 bufferedInput;
+    private bool hasBufferedInput;
+
+    // ---------------- JOYSTICK ----------------
+    [Header("Joystick")]
+    public Vector2 joystickInput;
+
+    [Header("Unity Joystick Pack")]
+    public Joystick joystick;   // drag your joystick here
+    [Range(0.1f, 1f)] public float joystickDeadZone = 0.2f;
+
+
+public void ToggleInputMode()
+{
+    useJoystick = !useJoystick;
+    useUIButtons = !useJoystick;
+
+    ResetHold();
+    UpdateInputModeVisuals();
+}
+
     // ---------------- INPUT ----------------
     private bool upPressed, downPressed, leftPressed, rightPressed;
 
@@ -65,28 +92,32 @@ public void OnUpPressed()
 { 
     upPressed = true; 
     currentHoldInput = Vector2.up;
-    TryTriggerMove(Vector2.up);
+    bufferedInput = Vector2.up;
+    hasBufferedInput = true;
 }
 
 public void OnDownPressed() 
 { 
     downPressed = true; 
     currentHoldInput = Vector2.down;
-    TryTriggerMove(Vector2.down);
+    bufferedInput = Vector2.down;
+    hasBufferedInput = true;
 }
 
 public void OnLeftPressed() 
 { 
     leftPressed = true; 
     currentHoldInput = Vector2.left;
-    TryTriggerMove(Vector2.left);
+    bufferedInput = Vector2.left;
+    hasBufferedInput = true;
 }
 
 public void OnRightPressed() 
 { 
     rightPressed = true; 
     currentHoldInput = Vector2.right;
-    TryTriggerMove(Vector2.right);
+    bufferedInput = Vector2.right;
+    hasBufferedInput = true;
 }
 
 public void OnUpReleased() { upPressed = false; ResetHold(); }
@@ -108,8 +139,6 @@ void ResetHold()
     public float slipJumpDuration = 0.3f;
     public float groundCheckDistance = 1.1f;
 
-    [Header("Dice Size")]
-    public float diceSize = 1f;
 
     [Header("Dice Faces")]
     public int topFace = 1, bottomFace = 6, frontFace = 2, backFace = 5, rightFace = 3, leftFace = 4;
@@ -140,27 +169,13 @@ void ResetHold()
     // ---------------- SCALE FIX ----------------
     private Vector3 fixedScale;
 
-    void OnValidate()
-    {
-        ApplyScale();
-    }
 
     void Start()
     {
-        ApplyScale();
+        UpdateInputModeVisuals();
     }
 
-    void LateUpdate()
-    {
-        if (transform.localScale != fixedScale)
-            transform.localScale = fixedScale;
-    }
 
-    void ApplyScale()
-    {
-        fixedScale = Vector3.one * diceSize;
-        transform.localScale = fixedScale;
-    }
 
     void Awake()
     {
@@ -189,14 +204,39 @@ void ResetHold()
         HandleUI();
         UpdateUIRigPosition();
 
-   // 🔥 KEYBOARD (unchanged smooth behavior)
-            if (!isMoving && !isBoosting && isGrounded && input != Vector2.zero)
+        // 🔥 STEP 1: COLLECT INPUT (DO NOT EXECUTE HERE)
+        if (useJoystick || useUIButtons)
+        {
+            HandleHoldInput(); // now ONLY buffers input
+        }
+        else
+        {
+            if (input != Vector2.zero)
             {
-                TryTriggerMove(input);
+                TryTriggerMove(input); // also only buffers now
             }
+        }
 
-            // 🔥 UI HOLD SYSTEM
-            HandleHoldInput();
+        // 🔥 STEP 2: SINGLE EXECUTION POINT (THIS IS THE IMPORTANT PART)
+        if (!isMoving && !isBoosting && isGrounded && hasBufferedInput)
+        {
+            Vector2 next = bufferedInput;
+            hasBufferedInput = false;
+
+            ExecuteMove(next);
+        }
+    }
+
+
+    void ExecuteMove(Vector2 dirInput)
+    {
+        Vector3 dir = GetDirection(dirInput);
+        lastMoveDirection = dir;
+
+        if (dirInput.magnitude > 0.9f)
+            StartCoroutine(SlipJump(dir));
+        else
+            StartCoroutine(JumpFlip(dir));
     }
 
     // ---------------- UI RIG ----------------
@@ -238,22 +278,34 @@ void ResetHold()
         }
     }
 
-        void HandleHoldInput()
+void HandleHoldInput()
+{
+    Vector2 rawInput = Vector2.zero;
+
+    if (useJoystick && joystick != null)
     {
-        if (isMoving || isBoosting || !isGrounded) return;
+        Vector2 joy = new Vector2(joystick.Horizontal, joystick.Vertical);
 
-        if (currentHoldInput == Vector2.zero) return;
-
-        holdTimer += Time.deltaTime;
-
-        if (holdTimer >= holdRepeatDelay)
+        if (joy.magnitude >= joystickDeadZone)
         {
-            TryTriggerMove(currentHoldInput);
-            holdTimer = 0f;
+            rawInput =
+                Mathf.Abs(joy.x) > Mathf.Abs(joy.y)
+                ? new Vector2(Mathf.Sign(joy.x), 0)
+                : new Vector2(0, Mathf.Sign(joy.y));
         }
     }
+    else if (useUIButtons)
+    {
+        rawInput = currentHoldInput;
+    }
 
-    void SetArrowAlpha(Image img, float a)
+    // 🔥 ONLY BUFFER FIRST INPUT (NOT EVERY FRAME)
+    if (rawInput != Vector2.zero && !isMoving)
+    {
+        bufferedInput = rawInput;
+        hasBufferedInput = true;
+    }
+}    void SetArrowAlpha(Image img, float a)
     {
         if (!img) return;
         var c = img.color;
@@ -283,23 +335,15 @@ void ResetHold()
     // ---------------- MOVEMENT ----------------
     void TryTriggerMove(Vector2 dirInput)
     {
-        if (isMoving || isBoosting || !isGrounded) return;
-
-        Vector3 dir = GetDirection(dirInput);
-
-        lastMoveDirection = dir; // 🔥 STORE DIRECTION
-
-        if (dirInput.magnitude > 0.9f)
-            StartCoroutine(SlipJump(dir));
-        else
-            StartCoroutine(JumpFlip(dir));
+        bufferedInput = dirInput;
+        hasBufferedInput = true;
     }
 
 IEnumerator JumpFlip(Vector3 direction)
 {
     StartMove();
 
-    float size = diceSize;
+    float size = transform.localScale.y; // assuming uniform scale and cube shape
     Vector3 pivot = transform.position + (Vector3.down * size / 2f) + (direction * size / 2f);
     Vector3 axis = Vector3.Cross(Vector3.up, direction);
 
@@ -401,6 +445,15 @@ IEnumerator TileBoost(int steps)
     isMoving = false;
 
     animator.SetBool("isMoving", false);
+}
+
+void UpdateInputModeVisuals()
+{
+    if (uiRig != null)
+        uiRig.gameObject.SetActive(useUIButtons);
+
+    if (joystick != null)
+        joystick.gameObject.SetActive(useJoystick);
 }
 IEnumerator DashCameraFX()
 {
@@ -512,42 +565,85 @@ IEnumerator FadeGhost(GameObject ghost)
         isMoving = true;
         animator.SetBool("isMoving", true);
 
-        if (audioSource && flipSound && canPlayMoveSound)
+        // 🔥 FIX AUDIO (no overlap, no cutoff)
+        if (audioSource && flipSound)
         {
-            audioSource.clip = flipSound;
-            audioSource.Play();
-            canPlayMoveSound = false;
-            Invoke(nameof(ResetMoveSound), flipSound.length);
+            audioSource.pitch = Random.Range(0.95f, 1.05f);
+            audioSource.PlayOneShot(flipSound, 1f);
         }
 
-        rb.linearVelocity = Vector3.zero;
-        rb.angularVelocity = Vector3.zero;
+        // 🔥 FIX PHYSICS ERROR (NO velocity set after kinematic)
         rb.isKinematic = true;
     }
 
+
     void ResetMoveSound() => canPlayMoveSound = true;
 
-    void EndMove()
+void EndMove()
+{
+    SnapToGrid();
+
+    int bottom = GetBottomFaceValue();
+    int top = 7 - bottom;
+
+    if (faceText) faceText.text = top.ToString();
+
+    bool boosted = CheckTileBoost(top);
+
+    if (!boosted)
     {
-        SnapToGrid();
+        rb.isKinematic = false;
+        isMoving = false;
+        animator.SetBool("isMoving", false);
+    }
 
-        int bottom = GetBottomFaceValue();
-        int top = 7 - bottom;
+    // 🔥 REAL HOLD CONTINUATION (THIS IS THE KEY FIX)
+    if (!isBoosting)
+    {
+        Vector2 nextInput = Vector2.zero;
 
-        if (faceText) faceText.text = top.ToString();
-
-        bool boosted = CheckTileBoost(top);
-
-        if (!boosted)
+        // JOYSTICK
+        if (useJoystick && joystick != null)
         {
-            rb.isKinematic = false;
-            rb.linearVelocity = Vector3.zero;
-            rb.angularVelocity = Vector3.zero;
+            Vector2 joy = new Vector2(joystick.Horizontal, joystick.Vertical);
 
-            isMoving = false;
-            animator.SetBool("isMoving", false);
+            if (joy.magnitude >= joystickDeadZone)
+            {
+                nextInput =
+                    Mathf.Abs(joy.x) > Mathf.Abs(joy.y)
+                    ? new Vector2(Mathf.Sign(joy.x), 0)
+                    : new Vector2(0, Mathf.Sign(joy.y));
+            }
+        }
+        // UI BUTTON HOLD
+        else if (useUIButtons)
+        {
+            nextInput = currentHoldInput;
+        }
+
+        // 🔥 ONLY CONTINUE IF STILL HOLDING
+        if (nextInput != Vector2.zero)
+        {
+            StartCoroutine(ContinueMoveNextFrame(nextInput));
+        }
+        else
+        {
+            hasBufferedInput = false; // 🔥 PREVENT EXTRA MOVE AFTER RELEASE
         }
     }
+}
+
+        IEnumerator ContinueMoveNextFrame(Vector2 inputDir)
+        {
+            yield return null; // 🔥 ONE FRAME DELAY (CRITICAL FIX)
+
+            // Ensure still valid
+            if (!isMoving && !isBoosting && isGrounded && inputDir != Vector2.zero)
+            {
+                ExecuteMove(inputDir);
+            }
+        }
+
 
     bool CheckTileBoost(int topFace)
     {
@@ -571,7 +667,12 @@ IEnumerator FadeGhost(GameObject ghost)
 
     void SnapToGrid()
     {
-        transform.position = SnapPosition(transform.position);
+        Vector3 snapped = SnapPosition(transform.position);
+
+        // 🔥 FORCE GROUND ALIGNMENT
+        snapped.y = groundHit.point.y + (transform.localScale.y / 2f);
+
+        transform.position = snapped;
 
         Vector3 r = transform.eulerAngles;
         transform.rotation = Quaternion.Euler(
