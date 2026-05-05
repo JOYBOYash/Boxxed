@@ -39,10 +39,12 @@ public class CubeJumpFlipController : MonoBehaviour
     [Header("Dash FX")]
     public float dashShakeIntensity = 0.15f;
     public float dashShakeDuration = 0.15f;
-
+    private int moveVersion = 0;
     public float dashZoomAmount = 1.5f;
     public float dashZoomDuration = 0.15f;
 
+    private bool ignoreNextFrameInput = false;
+    private bool ignoreInputAfterResume = false;
     private Vector3 camOriginalPos;
 
     [Header("Dash Trail")]
@@ -57,6 +59,8 @@ public class CubeJumpFlipController : MonoBehaviour
     [Header("Particles")]
     public GameObject flipParticlePrefab;
     public LayerMask groundLayer;
+
+    private float baseGameplayZoom;
 
 
         // ---------------- INPUT MODE ----------------
@@ -74,6 +78,8 @@ public class CubeJumpFlipController : MonoBehaviour
     [Header("Unity Joystick Pack")]
     public Joystick joystick;   // drag your joystick here
     [Range(0.1f, 1f)] public float joystickDeadZone = 0.2f;
+
+    private bool blockMoveContinuation = false;
 
 
 public void ToggleInputMode()
@@ -124,6 +130,7 @@ public void OnUpReleased() { upPressed = false; ResetHold(); }
 public void OnDownReleased() { downPressed = false; ResetHold(); }
 public void OnLeftReleased() { leftPressed = false; ResetHold(); }
 public void OnRightReleased() { rightPressed = false; ResetHold(); }
+
 
 void ResetHold()
 {
@@ -180,6 +187,9 @@ void ResetHold()
     private bool isGrounded, wasGrounded;
     private RaycastHit groundHit;
 
+    private float inputBlockTimer = 0f;
+    public float inputBlockDuration = 0.15f; // tweak if needed
+
     // ---------------- SCALE FIX ----------------
     private Vector3 fixedScale;
 
@@ -189,7 +199,10 @@ void ResetHold()
         UpdateInputModeVisuals();
     }
 
-
+    public void SetBaseZoom(float zoom)
+{
+    baseGameplayZoom = zoom;
+}
 
     void Awake()
     {
@@ -205,7 +218,17 @@ void ResetHold()
     void OnEnable()
     {
         controls.Enable();
-        controls.Player.Move.performed += ctx => input = ctx.ReadValue<Vector2>();
+         controls.Player.Move.performed += ctx =>
+        {
+            if (inputBlockTimer > 0f) return; // 🔥 BLOCK INPUT
+            input = ctx.ReadValue<Vector2>();
+        };
+
+        controls.Player.Move.canceled += ctx =>
+        {
+            if (inputBlockTimer > 0f) return; // 🔥 BLOCK INPUT
+            input = Vector2.zero;
+        };
         controls.Player.Move.canceled += ctx => input = Vector2.zero;
     }
 
@@ -214,49 +237,44 @@ void ResetHold()
         controls.Disable();
     }
 
-    void Update()
-    {
-        CheckGround();
-        HandleUI();
-        UpdateUIRigPosition();
+void Update()
+{
+    CheckGround();
+    HandleUI();
+    UpdateUIRigPosition();
 
-        // 🔥 STEP 1: COLLECT INPUT (DO NOT EXECUTE HERE)
-        if (useJoystick || useUIButtons)
+    if (ignoreInputAfterResume)
+    {
+        inputBlockTimer -= Time.deltaTime;
+
+        if (inputBlockTimer <= 0f)
         {
-            HandleSwipeInput();
-            HandleHoldInput(); // now ONLY buffers input
+            ignoreInputAfterResume = false;
         }
         else
         {
-            if (input != Vector2.zero)
-            {
-                TryTriggerMove(input); // also only buffers now
-            }
-        }
-
-        // 🔥 STEP 2: SINGLE EXECUTION POINT (THIS IS THE IMPORTANT PART)
-        if (!isMoving && !isBoosting && isGrounded && hasBufferedInput)
-        {
-            Vector2 next = bufferedInput;
-            hasBufferedInput = false;
-
-            ExecuteMove(next);
-        }
-
-        // 🔥 ANTI-SINK FAILSAFE (FINAL DEFENSE)
-        if (isGrounded)
-        {
-            float expectedY = groundHit.point.y + (transform.localScale.y * 0.5f);
-
-            if (transform.position.y < expectedY - 0.05f)
-            {
-                Vector3 fix = transform.position;
-                fix.y = expectedY;
-                transform.position = fix;
-            }
+            return;
         }
     }
 
+    // 🔥 STEP 2: GATHER INPUT
+    if (inputBlockTimer <= 0f)
+    {
+        HandleSwipeInput();
+        HandleHoldInput();
+    }
+
+    // 🔥 STEP 3: EXECUTE
+    if (!isMoving && !isBoosting && isGrounded && hasBufferedInput)
+    {
+        Vector2 next = bufferedInput;
+        hasBufferedInput = false;
+        ExecuteMove(next);
+    }
+
+    // (Rest of your Anti-sink logic and timer remains the same)
+    if (inputBlockTimer > 0f) inputBlockTimer -= Time.deltaTime;
+}
     void HandleSwipeInput()
     {
         if (!enableSwipeInput) return;
@@ -325,6 +343,12 @@ void ResetHold()
                 }
             }
         }
+
+        // if (touch.press.wasReleasedThisFrame)
+        // {
+        //     isSwiping = false;
+        //     currentHoldInput = Vector2.zero;
+        // }
     }
 
 
@@ -412,6 +436,15 @@ void HandleHoldInput()
     if (useJoystick && joystick != null)
     {
         Vector2 joy = new Vector2(joystick.Horizontal, joystick.Vertical);
+
+        if (joy.magnitude < joystickDeadZone)
+        {
+            joy = Vector2.zero;
+        }
+        else
+        {
+            joy = joy.normalized;
+        }
 
         if (joy.magnitude >= joystickDeadZone)
         {
@@ -629,8 +662,7 @@ IEnumerator DashZoomFX()
 
     AdvancedCameraFollow camFollow = Camera.main.GetComponent<AdvancedCameraFollow>();
     if (camFollow == null) yield break;
-
-    float originalZoom = camFollow.orthoZoom;
+float originalZoom = baseGameplayZoom;
     float zoomed = originalZoom - 5f; // 🔥 REQUIRED
 
     float elapsed = 0f;
@@ -764,27 +796,29 @@ void EndMove()
         }
 
         // 🔥 ONLY CONTINUE IF STILL HOLDING
-        if (nextInput != Vector2.zero)
+        if (!blockMoveContinuation && nextInput != Vector2.zero)
         {
-            StartCoroutine(ContinueMoveNextFrame(nextInput));
+            StartCoroutine(ContinueMoveNextFrame(nextInput, moveVersion));
         }
         else
         {
-            hasBufferedInput = false; // 🔥 PREVENT EXTRA MOVE AFTER RELEASE
+            hasBufferedInput = false;
         }
     }
 }
 
-        IEnumerator ContinueMoveNextFrame(Vector2 inputDir)
-        {
-            yield return null; // 🔥 ONE FRAME DELAY (CRITICAL FIX)
+    IEnumerator ContinueMoveNextFrame(Vector2 inputDir, int version)
+    {
+        yield return null;
 
-            // Ensure still valid
-            if (!isMoving && !isBoosting && isGrounded && inputDir != Vector2.zero)
-            {
-                ExecuteMove(inputDir);
-            }
+        // 🔥 KILL OLD COROUTINES AFTER PAUSE
+        if (version != moveVersion) yield break;
+
+        if (!isMoving && !isBoosting && isGrounded && inputDir != Vector2.zero)
+        {
+            ExecuteMove(inputDir);
         }
+    }
 
 
     bool CheckTileBoost(int topFace)
@@ -900,4 +934,43 @@ void ForceGroundSnapAndFX()
             ? (dir.x > 0 ? Vector3.right : Vector3.left)
             : (dir.z > 0 ? Vector3.forward : Vector3.back);
     }
+
+public void HardResetAfterPause()
+{
+    StopAllCoroutines();
+    moveVersion++; 
+
+    // Reset ALL movement states
+    isMoving = false;
+    isBoosting = false;
+    
+    // Reset ALL input buffers
+    bufferedInput = Vector2.zero;
+    hasBufferedInput = false;
+    currentHoldInput = Vector2.zero;
+    input = Vector2.zero;
+    
+    // Reset UI Button flags
+    upPressed = downPressed = leftPressed = rightPressed = false;
+    isSwiping = false;
+
+    // Reset Physics
+    if (rb != null)
+    {
+        rb.isKinematic = false;
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+    }
+
+    // Force snap to ground
+    if (isGrounded)
+    {
+        float halfHeight = transform.localScale.y * 0.5f;
+        transform.position = new Vector3(transform.position.x, groundHit.point.y + halfHeight, transform.position.z);
+    }
+
+    // 🔥 THE FIX: Setup the flush
+    ignoreInputAfterResume = true;
+    inputBlockTimer = 0.2f; 
+}
 }
