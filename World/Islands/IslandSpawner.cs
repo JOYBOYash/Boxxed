@@ -29,12 +29,37 @@ public class ProceduralIslandGenerator : MonoBehaviour
     public int maxGemsPerIsland = 2;
     public float gemHeightOffset = 0.5f;
 
+    [Header("Obstacle Scale")]
+    public bool useCustomObstacleScale = false;
+
+    public Vector3 obstacleScale = Vector3.one;
+
     [Header("Gem Rotation")]
-    public Vector3 gemRotationOffset;          // 🔥 FULL XYZ CONTROL
-    public bool randomizeYRotation = true;     // 🔥 variation
-    public bool alignToPathDirection = false;  // 🔥 face forward
+    public Vector3 gemRotationOffset;
+    public bool randomizeYRotation = true;
+    public bool alignToPathDirection = false;
+
+    // ---------------- OBSTACLES ----------------
+    [Header("Obstacles")]
+    public GameObject[] obstaclePrefabs;
+
+    [Range(0f, 1f)]
+    public float obstacleSpawnChance = 0.7f;
+
+    public int maxObstaclesPerIsland = 3;
+
+    public float obstacleHeightOffset = 0.5f;
+
+    [Header("Obstacle Placement")]
+    public float minimumObstacleSpacing = 2f;
+    public float minimumGemSpacing = 1.5f;
+
+    [Header("Obstacle Rotation")]
+    public Vector3 obstacleRotationOffset;
+    public bool randomizeObstacleYRotation = true;
 
     private Dictionary<int, GameObject> spawned = new Dictionary<int, GameObject>();
+
     private float blockWidth = 10f;
 
     void Start()
@@ -99,6 +124,7 @@ public class ProceduralIslandGenerator : MonoBehaviour
         GameObject prefab = islandPrefabs[Random.Range(0, islandPrefabs.Length)];
 
         Renderer rend = prefab.GetComponentInChildren<Renderer>();
+
         if (rend == null)
         {
             Debug.LogError("Prefab missing Renderer!");
@@ -106,6 +132,7 @@ public class ProceduralIslandGenerator : MonoBehaviour
         }
 
         Vector3 size = rend.bounds.size;
+
         float height = size.y;
 
         float spawnX = index * blockWidth;
@@ -113,19 +140,27 @@ public class ProceduralIslandGenerator : MonoBehaviour
         // 🔥 HEIGHT VARIATION
         float noiseY = Mathf.PerlinNoise(index * smoothness, 0f);
         float heightOffset = (noiseY - 0.5f) * heightVariation;
+
         float spawnY = goldenLine.position.y + heightOffset - (height / 2f);
 
         // 🔥 SIDE VARIATION
         float noiseZ = Mathf.PerlinNoise(0f, index * smoothness);
         float sideOffset = (noiseZ - 0.5f) * sideVariation;
+
         float spawnZ = goldenLine.position.z + sideOffset;
 
         Vector3 spawnPos = new Vector3(spawnX, spawnY, spawnZ);
 
         GameObject island = Instantiate(prefab, spawnPos, Quaternion.identity);
 
-        // 🔥 GEMS
-        SpawnGems(island, size);
+        // 🔥 SHARED POSITION CACHE
+        List<Vector3> occupiedPositions = new List<Vector3>();
+
+        // 🔥 SPAWN GEMS
+        SpawnGems(island, size, occupiedPositions);
+
+        // 🔥 SPAWN OBSTACLES
+        SpawnObstacles(island, size, occupiedPositions);
 
         spawned.Add(index, island);
     }
@@ -137,12 +172,13 @@ public class ProceduralIslandGenerator : MonoBehaviour
         if (islandPrefabs.Length == 0) return;
 
         Renderer r = islandPrefabs[0].GetComponentInChildren<Renderer>();
+
         blockWidth = r.bounds.size.x + extraGap;
     }
 
-    // ---------------- GEM SPAWN ----------------
+    // ---------------- GEMS ----------------
 
-    void SpawnGems(GameObject island, Vector3 size)
+    void SpawnGems(GameObject island, Vector3 size, List<Vector3> occupied)
     {
         if (gemPrefab == null) return;
 
@@ -152,30 +188,139 @@ public class ProceduralIslandGenerator : MonoBehaviour
 
         for (int i = 0; i < gemCount; i++)
         {
-            float randomX = Random.Range(-size.x * 0.4f, size.x * 0.4f);
-            float randomZ = Random.Range(-size.z * 0.4f, size.z * 0.4f);
+            Vector3 spawnPos;
 
-            Vector3 spawnPos = island.transform.position +
-                new Vector3(randomX, size.y / 2f + gemHeightOffset, randomZ);
+            if (!TryGetValidPosition(island, size, occupied, minimumGemSpacing, out spawnPos))
+                continue;
 
-            // 🔥 BASE ROTATION
             Quaternion rotation = Quaternion.Euler(gemRotationOffset);
 
-            // 🔥 RANDOM Y ROTATION
             if (randomizeYRotation)
             {
                 float randomY = Random.Range(0f, 360f);
                 rotation *= Quaternion.Euler(0f, randomY, 0f);
             }
 
-            // 🔥 ALIGN TO PATH (X direction)
             if (alignToPathDirection)
             {
                 Vector3 forwardDir = Vector3.right;
-                rotation = Quaternion.LookRotation(forwardDir) * Quaternion.Euler(gemRotationOffset);
+
+                rotation =
+                    Quaternion.LookRotation(forwardDir) *
+                    Quaternion.Euler(gemRotationOffset);
             }
 
             Instantiate(gemPrefab, spawnPos, rotation, island.transform);
+
+            occupied.Add(spawnPos);
         }
+    }
+
+    // ---------------- OBSTACLES ----------------
+
+void SpawnObstacles(GameObject island, Vector3 size, List<Vector3> occupied)
+{
+    if (obstaclePrefabs == null || obstaclePrefabs.Length == 0)
+        return;
+
+    if (Random.value > obstacleSpawnChance)
+        return;
+
+    int obstacleCount = Random.Range(1, maxObstaclesPerIsland + 1);
+
+    for (int i = 0; i < obstacleCount; i++)
+    {
+        Vector3 spawnPos;
+
+        if (!TryGetValidPosition(
+            island,
+            size,
+            occupied,
+            minimumObstacleSpacing,
+            out spawnPos))
+            continue;
+
+        GameObject obstaclePrefab =
+            obstaclePrefabs[Random.Range(0, obstaclePrefabs.Length)];
+
+        Quaternion rotation =
+            Quaternion.Euler(obstacleRotationOffset);
+
+        if (randomizeObstacleYRotation)
+        {
+            float randomY = Random.Range(0f, 360f);
+
+            rotation *= Quaternion.Euler(0f, randomY, 0f);
+        }
+
+        // 🔥 SPAWN FIRST
+        GameObject spawnedObstacle =
+            Instantiate(obstaclePrefab, spawnPos, rotation);
+
+        // 🔥 PARENT AFTER SPAWN
+        spawnedObstacle.transform.SetParent(island.transform);
+
+        // 🔥 FIX SCALE
+        if (useCustomObstacleScale)
+        {
+            spawnedObstacle.transform.localScale = obstacleScale;
+        }
+        else
+        {
+            // 🔥 preserve prefab scale
+            spawnedObstacle.transform.localScale =
+                obstaclePrefab.transform.localScale;
+        }
+
+        occupied.Add(spawnPos);
+    }
+}
+    // ---------------- VALID POSITION ----------------
+
+    bool TryGetValidPosition(
+        GameObject island,
+        Vector3 size,
+        List<Vector3> occupied,
+        float minSpacing,
+        out Vector3 validPos)
+    {
+        int attempts = 20;
+
+        for (int i = 0; i < attempts; i++)
+        {
+            float randomX =
+                Random.Range(-size.x * 0.4f, size.x * 0.4f);
+
+            float randomZ =
+                Random.Range(-size.z * 0.4f, size.z * 0.4f);
+
+            Vector3 pos =
+                island.transform.position +
+                new Vector3(
+                    randomX,
+                    size.y / 2f + obstacleHeightOffset,
+                    randomZ
+                );
+
+            bool overlaps = false;
+
+            foreach (Vector3 used in occupied)
+            {
+                if (Vector3.Distance(pos, used) < minSpacing)
+                {
+                    overlaps = true;
+                    break;
+                }
+            }
+
+            if (!overlaps)
+            {
+                validPos = pos;
+                return true;
+            }
+        }
+
+        validPos = Vector3.zero;
+        return false;
     }
 }

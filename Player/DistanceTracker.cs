@@ -20,6 +20,11 @@ public class DistanceTracker : MonoBehaviour
         bestDistance = PlayerPrefs.GetFloat("BEST_DISTANCE", 0f);
     }
 
+    public float GetDistance()
+    {
+        return currentDistance;
+    }
+
     void Update()
     {
         if (player == null) return;

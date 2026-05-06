@@ -47,6 +47,8 @@ public class CubeJumpFlipController : MonoBehaviour
     private bool ignoreInputAfterResume = false;
     private Vector3 camOriginalPos;
 
+    private Coroutine dashZoomRoutine;
+
     [Header("Dash Trail")]
     public GameObject ghostPrefab;
     public float ghostSpawnDelay = 0.05f;
@@ -196,6 +198,10 @@ void ResetHold()
 
     void Start()
     {
+        if (baseGameplayZoom <= 0f)
+        {
+            baseGameplayZoom = 25f;
+        }
         UpdateInputModeVisuals();
     }
 
@@ -656,44 +662,71 @@ IEnumerator DashCameraFX()
 
     cam.localPosition = camOriginalPos;
 }
+
 IEnumerator DashZoomFX()
 {
-    if (Camera.main == null) yield break;
+    if (Camera.main == null)
+        yield break;
 
-    AdvancedCameraFollow camFollow = Camera.main.GetComponent<AdvancedCameraFollow>();
-    if (camFollow == null) yield break;
-float originalZoom = baseGameplayZoom;
-    float zoomed = originalZoom - 5f; // 🔥 REQUIRED
+    AdvancedCameraFollow camFollow =
+        Camera.main.GetComponent<AdvancedCameraFollow>();
 
-    float elapsed = 0f;
+    if (camFollow == null)
+        yield break;
 
-    // ZOOM IN
-    while (elapsed < dashZoomDuration)
+    // 🔥 STOP OLD DASH ZOOM
+    if (dashZoomRoutine != null)
     {
-        float t = elapsed / dashZoomDuration;
-        float eased = t * t * (3f - 2f * t);
-
-        camFollow.orthoZoom = Mathf.Lerp(originalZoom, zoomed, eased);
-
-        elapsed += Time.deltaTime;
-        yield return null;
+        StopCoroutine(dashZoomRoutine);
     }
 
-    elapsed = 0f;
+    dashZoomRoutine =
+        StartCoroutine(
+            DashZoomRoutine(camFollow)
+        );
 
-    // ZOOM OUT
-    while (elapsed < dashZoomDuration)
-    {
-        float t = elapsed / dashZoomDuration;
-        float eased = t * t * (3f - 2f * t);
+    yield return dashZoomRoutine;
+}
 
-        camFollow.orthoZoom = Mathf.Lerp(zoomed, originalZoom, eased);
+IEnumerator DashZoomRoutine(
+    AdvancedCameraFollow camFollow
+)
+{
+    // 🔥 SAFE VALUES
+    float gameplayZoom =
+        Mathf.Max(baseGameplayZoom, 8f);
 
-        elapsed += Time.deltaTime;
-        yield return null;
-    }
+    float dashZoom =
+        Mathf.Clamp(
+            gameplayZoom - dashZoomAmount,
+            5f,
+            20f
+        );
 
-    camFollow.orthoZoom = originalZoom;
+    // 🔥 ZOOM IN
+    camFollow.ZoomTo(
+        dashZoom,
+        dashZoomDuration
+    );
+
+    yield return new WaitForSecondsRealtime(
+        dashZoomDuration
+    );
+
+    // 🔥 RESET BACK
+    camFollow.ZoomTo(
+        gameplayZoom,
+        dashZoomDuration
+    );
+
+    yield return new WaitForSecondsRealtime(
+        dashZoomDuration
+    );
+
+    // 🔥 FORCE FINAL RESET
+    camFollow.SetZoom(gameplayZoom);
+
+    dashZoomRoutine = null;
 }
 
 IEnumerator SpawnGhostTrail()
@@ -937,7 +970,6 @@ void ForceGroundSnapAndFX()
 
 public void HardResetAfterPause()
 {
-    StopAllCoroutines();
     moveVersion++; 
 
     // Reset ALL movement states
@@ -973,4 +1005,5 @@ public void HardResetAfterPause()
     ignoreInputAfterResume = true;
     inputBlockTimer = 0.2f; 
 }
+
 }

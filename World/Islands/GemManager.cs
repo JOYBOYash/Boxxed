@@ -49,6 +49,11 @@ public class GemManager : MonoBehaviour
             originalColor = playerRenderer.material.color;
     }
 
+        public int GetTotalGems()
+    {
+        return totalGems;
+    }
+
     // ---------------- MAIN ENTRY ----------------
 
     public void AddGems(int amount, Vector3 worldPos)
