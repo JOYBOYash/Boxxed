@@ -628,7 +628,7 @@ IEnumerator TileBoost(int steps)
     animator.SetBool("isMoving", false);
 }
 
-void UpdateInputModeVisuals()
+public void UpdateInputModeVisuals()
 {
     if (uiRig != null)
         uiRig.gameObject.SetActive(useUIButtons);
