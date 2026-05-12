@@ -39,6 +39,9 @@ public class GameMenuController : MonoBehaviour
     [Header("Fade Settings")]
     public float fadeDuration = 0.4f;
 
+    [Header("Quit Popup")]
+public QuitPopupController quitPopup;
+
     private bool gameStarted = false;
 
     void Start()
@@ -229,6 +232,9 @@ yield return new WaitForSeconds(
 
     public void OnQuitPressed()
     {
-        Application.Quit();
+        if (quitPopup != null)
+        {
+            quitPopup.OpenPopup();
+        }
     }
 }

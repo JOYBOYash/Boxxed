@@ -315,6 +315,14 @@ public class PlayerHealth : MonoBehaviour
             );
         }
 
+        CubeJumpFlipController controller =
+            GetComponent<CubeJumpFlipController>();
+
+        if (controller != null)
+        {
+            controller.ForceStopAllMovement();
+        }
+
         if (gameMenu != null)
         {
             gameMenu.OnPlayerDeath();

@@ -185,6 +185,7 @@ void ResetHold()
     private Vector2 input;
     private bool isMoving;
     private bool isBoosting;
+    private bool isDead = false;
 
     private bool isGrounded, wasGrounded;
     private RaycastHit groundHit;
@@ -245,8 +246,14 @@ void ResetHold()
 
 void Update()
 {
+    // 🔥 FULL HARD STOP AFTER DEATH
+    if (isDead)
+        return;
+
     CheckGround();
+
     HandleUI();
+
     UpdateUIRigPosition();
 
     if (ignoreInputAfterResume)
@@ -263,23 +270,31 @@ void Update()
         }
     }
 
-    // 🔥 STEP 2: GATHER INPUT
+    // 🔥 INPUT
     if (inputBlockTimer <= 0f)
     {
         HandleSwipeInput();
+
         HandleHoldInput();
     }
 
-    // 🔥 STEP 3: EXECUTE
-    if (!isMoving && !isBoosting && isGrounded && hasBufferedInput)
+    // 🔥 EXECUTE BUFFER
+    if (
+        !isMoving &&
+        !isBoosting &&
+        isGrounded &&
+        hasBufferedInput
+    )
     {
         Vector2 next = bufferedInput;
+
         hasBufferedInput = false;
+
         ExecuteMove(next);
     }
 
-    // (Rest of your Anti-sink logic and timer remains the same)
-    if (inputBlockTimer > 0f) inputBlockTimer -= Time.deltaTime;
+    if (inputBlockTimer > 0f)
+        inputBlockTimer -= Time.deltaTime;
 }
     void HandleSwipeInput()
     {
@@ -1004,6 +1019,53 @@ public void HardResetAfterPause()
     // 🔥 THE FIX: Setup the flush
     ignoreInputAfterResume = true;
     inputBlockTimer = 0.2f; 
+}
+
+public void ForceStopAllMovement()
+{
+    isDead = true;
+
+    // 🔥 KILL ALL COROUTINES
+    StopAllCoroutines();
+
+    // 🔥 RESET MOVEMENT
+    isMoving = false;
+    isBoosting = false;
+
+    // 🔥 RESET INPUTS
+    input = Vector2.zero;
+    bufferedInput = Vector2.zero;
+    currentHoldInput = Vector2.zero;
+
+    hasBufferedInput = false;
+
+    upPressed = false;
+    downPressed = false;
+    leftPressed = false;
+    rightPressed = false;
+
+    isSwiping = false;
+
+    // 🔥 RESET PHYSICS
+    if (rb != null)
+    {
+        rb.isKinematic = false;
+
+        rb.linearVelocity = Vector3.zero;
+        rb.angularVelocity = Vector3.zero;
+    }
+
+    // 🔥 STOP ANIMATOR
+    if (animator != null)
+    {
+        animator.SetBool("isMoving", false);
+    }
+
+    // 🔥 STOP AUDIO
+    if (audioSource != null)
+    {
+        audioSource.Stop();
+    }
 }
 
 }

@@ -40,8 +40,24 @@ public class ProceduralIslandGenerator : MonoBehaviour
     public bool alignToPathDirection = false;
 
     // ---------------- OBSTACLES ----------------
-    [Header("Obstacles")]
-    public GameObject[] obstaclePrefabs;
+
+    [System.Serializable]
+    public class ObstacleData
+    {
+        public GameObject prefab;
+
+        [Header("Transform")]
+        public Vector3 scale = Vector3.one;
+
+        public Vector3 rotationOffset;
+
+        public float heightOffset = 0.5f;
+
+        [Header("Rotation")]
+        public bool randomizeYRotation = true;
+    }
+
+public ObstacleData[] obstaclePrefabs;
 
     [Range(0f, 1f)]
     public float obstacleSpawnChance = 0.7f;
@@ -297,9 +313,17 @@ void SpawnObstacles(
 
         int attempts = 20;
 
+        // 🔥 RANDOM OBSTACLE DATA
+        ObstacleData obstacleData =
+            obstaclePrefabs[
+                Random.Range(
+                    0,
+                    obstaclePrefabs.Length
+                )
+            ];
+
         for (int a = 0; a < attempts; a++)
         {
-            // 🔥 RANDOM LOCAL POSITION
             float randomX =
                 Random.Range(
                     -size.x * 0.4f,
@@ -316,13 +340,14 @@ void SpawnObstacles(
                 island.transform.position +
                 new Vector3(
                     randomX,
-                    size.y / 2f + obstacleHeightOffset,
+                    size.y / 2f +
+                    obstacleData.heightOffset,
                     randomZ
                 );
 
             bool overlaps = false;
 
-            // 🔥 CHECK OTHER OBJECTS
+            // 🔥 CHECK SPACING
             foreach (Vector3 used in occupied)
             {
                 if (
@@ -337,7 +362,7 @@ void SpawnObstacles(
                 }
             }
 
-            // 🔥 PREVENT SPAWN UNDER PLAYER
+            // 🔥 SAFE PLAYER START AREA
             if (player != null)
             {
                 float distanceToPlayer =
@@ -354,7 +379,6 @@ void SpawnObstacles(
                         )
                     );
 
-                // 🔥 SAFE START AREA
                 if (distanceToPlayer < 4f)
                 {
                     overlaps = true;
@@ -376,20 +400,13 @@ void SpawnObstacles(
         if (!foundValid)
             continue;
 
-        GameObject obstaclePrefab =
-            obstaclePrefabs[
-                Random.Range(
-                    0,
-                    obstaclePrefabs.Length
-                )
-            ];
-
         Quaternion rotation =
             Quaternion.Euler(
-                obstacleRotationOffset
+                obstacleData.rotationOffset
             );
 
-        if (randomizeObstacleYRotation)
+        // 🔥 RANDOM Y ROTATION
+        if (obstacleData.randomizeYRotation)
         {
             float randomY =
                 Random.Range(0f, 360f);
@@ -405,27 +422,15 @@ void SpawnObstacles(
         // 🔥 SPAWN
         GameObject spawnedObstacle =
             Instantiate(
-                obstaclePrefab,
+                obstacleData.prefab,
                 spawnPos,
-                rotation
+                rotation,
+                island.transform
             );
 
-        // 🔥 PARENT
-        spawnedObstacle.transform.SetParent(
-            island.transform
-        );
-
-        // 🔥 SCALE
-        if (useCustomObstacleScale)
-        {
-            spawnedObstacle.transform.localScale =
-                obstacleScale;
-        }
-        else
-        {
-            spawnedObstacle.transform.localScale =
-                obstaclePrefab.transform.localScale;
-        }
+        // 🔥 UNIQUE SCALE
+        spawnedObstacle.transform.localScale =
+            obstacleData.scale;
 
         occupied.Add(spawnPos);
     }
